@@ -2346,7 +2346,7 @@ void main();
 - Consumes: 已实现行为（Task 2–11）。
 - Produces: 行为契约文档（后续 D2–D4 逐节追加）。
 
-- [ ] **Step 1: 写 SPEC.md**（章节骨架 + D1 契约；`live-verified` 标注留给 Task 14 回填）
+- [x] **Step 1: 写 SPEC.md**（章节骨架 + D1 契约；`live-verified` 标注留给 Task 14 回填）
 
 ```md
 # dingtalkbot SPEC
@@ -2387,7 +2387,7 @@ void main();
 3. 显式 ack（`{status:'SUCCESS'}` 结果体，SDK 包装为 `{response:…}`）足以抑制 60s 重推——观察 smoke 后日志无同 messageId 重复 `收到消息`。
 ```
 
-- [ ] **Step 2: 写 CHANGELOG.md**
+- [x] **Step 2: 写 CHANGELOG.md**
 
 ```md
 # Changelog（Keep a Changelog zh-CN / SemVer）
@@ -2400,9 +2400,9 @@ void main();
 - SPEC.md 行为契约（D1 波次）与 CI 门禁（typecheck/test/build/check:dist）（issue #1）。
 ```
 
-- [ ] **Step 3: README 充实**（定位、安装（GitHub Packages）、三条快速命令、指向 SPEC.md）。
+- [x] **Step 3: README 充实**（定位、安装（GitHub Packages）、三条快速命令、指向 SPEC.md）。
 
-- [ ] **Step 4: 验证 + Commit** — Run: `bun run typecheck && bun test` Expected: 全绿。`git add SPEC.md CHANGELOG.md README.md && git commit -m "docs: D1 behavior contract (SPEC) + changelog + readme"`
+- [x] **Step 4: 验证 + Commit** — Run: `bun run typecheck && bun test` Expected: 全绿。`git add SPEC.md CHANGELOG.md README.md && git commit -m "docs: D1 behavior contract (SPEC) + changelog + readme"`
 
 ### Task 13: 构建管线 + dist 洁净检查 + CI + 发布管道
 
