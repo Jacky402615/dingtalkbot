@@ -18,6 +18,11 @@ export class TurnQueue {
 
   waitIdle(chatKey: string): Promise<void> { return this.chats.get(chatKey)?.chain ?? Promise.resolve(); }
 
+  // 等待全部在飞回合的外围 job 收尾（bridge.fail/持久化等）；close 丢弃的排队回合链会快速自了
+  drainActive(): Promise<void> {
+    return Promise.all([...this.chats.values()].map((c) => c.chain)).then(() => {});
+  }
+
   enqueue(chatKey: string, job: () => Promise<void>): boolean {
     if (this.closedFlag) {
       this.opts.logger.warn('queue', `队列已关闭，拒绝 chat ${chatKey} 新消息`);

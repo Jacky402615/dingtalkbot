@@ -301,3 +301,62 @@ test('runner: killAll 等待升级收尾——await 返回时回合已 settle �
   expect(res.errorText).toContain('killAll');
   expect(child.killed).toContain('SIGKILL-4321');
 });
+
+// ---- pr-review r1 修复回归 ----
+test('runner: 同消息 [text, AskUserQuestion, text]——问题后文本不泄漏进快照；outputText 仍全量', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const order: string[] = [];
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {
+    onText: (t) => { order.push(`text:${t}`); },
+    onQuestion: (q) => { order.push('question'); },
+  });
+  child.write(assistantMsg('m1', [
+    { type: 'text', text: '先说明' },
+    { type: 'tool_use', id: 'c1', name: 'AskUserQuestion',
+      input: { questions: [{ question: '选？', header: 'H', multiSelect: false, options: [{ label: 'A', description: '' }] }] } },
+    { type: 'text', text: '问题后的说明（不得泄漏）' },
+  ]));
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  const res = await p;
+  expect(order).toEqual(['text:先说明', 'question']);            // 快照只含问题前文本
+  expect(res.outputText).toBe('先说明问题后的说明（不得泄漏）');  // 全量累计供 outputText
+});
+
+test('runner: 多字节 UTF-8 跨 chunk 分裂不破坏（StringDecoder）', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const seen: string[] = [];
+  const payload = JSON.stringify(assistantMsg('m1', [{ type: 'text', text: '你好' }])) + '\n';
+  const bytes = Buffer.from(payload, 'utf8');
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, { onText: (t) => { seen.push(t); } });
+  // 在"你"的三字节中间切一刀、在换行前切一刀
+  const youIdx = bytes.indexOf(Buffer.from('你', 'utf8'));
+  child.writeBytes(bytes.subarray(0, youIdx + 1));
+  child.writeBytes(bytes.subarray(youIdx + 1, bytes.length - 1));
+  child.writeBytes(bytes.subarray(bytes.length - 1));
+  child.write(JSON.stringify({ type: 'result', subtype: 'success' }));
+  child.closeStdout(); child.exitWith(0);
+  const res = await p;
+  expect(seen.at(-1)).toBe('你好');          // 无 U+FFFD
+  expect(res.outputText).toBe('你好');
+});
+
+test('runner: 看门狗 TERM 后主进程先退 → finish 仍补发进程组 SIGKILL（升级不被取消）', async () => {
+  const child = makeFakeChild();
+  const r = new ClaudeRunner({
+    bin: 'claude', model: 'm', permissionMode: 'bypassPermissions', timeoutMs: 30,
+    logger: silentLogger(), killDelayMs: 5_000, // KILL 定时器看似很晚——靠 finish 内补发
+    spawnFn: (() => child) as unknown as typeof spawn,
+    killFn: (pid, sig) => {
+      child.killed.push(`${sig}${pid < 0 ? '-' + String(-pid) : ''}`);
+      if (sig === 'SIGTERM') child.exitWith(null); // 主进程响应 TERM 提前退出
+    },
+  });
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: '部分' }]));
+  const res = await p;
+  expect(res.ok).toBe(false);
+  expect(res.errorText).toContain('超时');
+  expect(child.killed).toContain('SIGKILL-4321'); // 主进程早退也拿到组 KILL
+});

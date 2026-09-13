@@ -65,3 +65,17 @@ test('queue: close——拒绝新入队；排队未开始的 job 轮到时丢弃
   expect(ran).toEqual(['t1', 't1-end']); // t2 未执行
   expect(warns.some((w) => w.includes('丢弃') || w.includes('关闭'))).toBe(true);
 });
+
+// ---- pr-review r1 修复回归 ----
+test('queue: drainActive——close 后等待在飞 job 完整收尾（含排队丢弃链快速自了）', async () => {
+  const q = new TurnQueue({ maxPerChat: 5, logger: logger() });
+  const d1 = deferred();
+  const events: string[] = [];
+  q.enqueue('c1', async () => { events.push('job-start'); await d1.p; events.push('job-end'); });
+  await new Promise((r) => setTimeout(r, 10));
+  q.enqueue('c1', async () => { events.push('queued-should-drop'); });
+  q.close();
+  d1.release();
+  await q.drainActive();
+  expect(events).toEqual(['job-start', 'job-end']); // 在飞收尾完成 + 排队被丢弃
+});

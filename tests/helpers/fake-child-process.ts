@@ -7,6 +7,7 @@ export interface FakeChild {
   on(event: 'exit', cb: (code: number | null) => void): void;
   write(line: unknown): void;
   writeRaw(line: string): void;
+  writeBytes(b: Buffer): void;
   closeStdout(): void;
   failSpawn(err: Error): void;
   exitWith(code: number | null): void;
@@ -33,6 +34,7 @@ export function makeFakeChild(): FakeChild {
     },
     write: (line) => { for (const cb of datas) cb(Buffer.from(JSON.stringify(line) + '\n')); },
     writeRaw: (line) => { for (const cb of datas) cb(Buffer.from(line + '\n')); },
+    writeBytes: (b) => { for (const cb of datas) cb(b); },
     closeStdout: () => { for (const cb of closes) cb(); },
     failSpawn: (err) => { for (const cb of errors) cb(err); },
     exitWith: (code: number | null) => { for (const cb of exits) cb(code); },

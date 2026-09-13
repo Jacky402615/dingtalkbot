@@ -60,6 +60,7 @@ export async function runCommand(
     logger.info('run', `收到 ${signal}，关停中`);
     effectiveQueue.close();         // 拒新 + 丢弃排队回合（关停后不再 spawn）
     await effectiveRunner.killAll(); // detached 子进程组不随父退出——TERM→KILL 升级收尾完成才继续
+    await effectiveQueue.drainActive(); // 在飞回合的卡收终/会话持久化完成才退出（卡不悬挂）
     await gateway.stop();
     if (!clearPidFile(paths.pidFile)) logger.warn('run', `pidfile 清理失败: ${paths.pidFile}`);
     logger.info('run', '已退出');

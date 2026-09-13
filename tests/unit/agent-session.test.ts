@@ -53,7 +53,7 @@ function harness(runner: ClaudeRunner, config = { ...DEFAULT_CONFIG, aiCardTempl
   const queue = new TurnQueue({ maxPerChat: 10, logger: quietLogger as never });
   const handler = createAgentSessionHandler({ replyer, cardClient, runner, store, queue, config,
     logger: quietLogger as never, workspace: '/ws' });
-  return { handler, md, cardCalls, store, queue };
+  return { handler, md, cardCalls, cardClient, store, queue };
 }
 
 test('handler: p2p 文本回合——前缀 prompt、卡流式收终、TTL 内 resume（AC1/AC2 面）', async () => {
@@ -296,4 +296,32 @@ test('handler: 排队对账后的会话持久化不再复活幽灵 id（成功�
   expect(stored).not.toBeNull();
   expect(stored!.sessionId).toBe(seen[1].sessionId); // 盘面 = 对账后的新 id，不是幽灵 id
   expect(stored!.sessionId).not.toBe(seen[0].sessionId);
+});
+
+// ---- pr-review r1 修复回归 ----
+test('handler: help 直发失败 → msgId 未记去重，adapter 重试可重发（必达响应不被吞）', async () => {
+  const { calls, runner } = fakeRunner([(_req, cbs) => { cbs.onQuestion?.(QUESTION); }]);
+  const h = harness(runner);
+  await h.handler(msg({ msgId: 'k1' }));       // 出题
+  await h.queue.waitIdle('p2p:st1');
+  const attempts: string[] = [];
+  let sendCount = 0;
+  const flakyReplyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => {
+      sendCount += 1;
+      attempts.push(text);
+      if (sendCount === 1) throw new Error('send fail'); // 首次发送失败
+    },
+    sendGroupMarkdown: async () => {},
+  } as unknown as RobotReplyer;
+  const h2 = harness(fakeRunner([() => {}]).runner);
+  // 用同一 store 延续 pending：直接以 flaky replyer 重组 handler
+  const store2 = h.store;
+  const handler2 = createAgentSessionHandler({ replyer: flakyReplyer, cardClient: h2.cardClient,
+    runner: fakeRunner([() => {}]).runner, store: store2, queue: h2.queue, config: { ...DEFAULT_CONFIG, aiCardTemplateId: 'tpl' },
+    logger: quietLogger as never, workspace: '/ws' });
+  await expect(handler2(msg({ msgId: 'k2', textContent: '9' }))).rejects.toThrow('send fail'); // 首次失败（未记去重）
+  await handler2(msg({ msgId: 'k2', textContent: '9' }));                                       // 重试送达
+  expect(attempts.length).toBe(2);
+  expect(attempts[1]).toContain('编号');
 });

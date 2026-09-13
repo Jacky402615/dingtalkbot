@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import type { Logger } from '../logger.js';
 
 export interface AskOption { label: string; description: string }
@@ -98,6 +99,11 @@ export class ClaudeRunner {
       const finish = (ok: boolean, errorText: string) => {
         if (settled) return;
         settled = true;
+        if (forcedError !== null) {
+          // 看门狗/关停定性后主进程若已先退（TERM 生效），升级定时器会被下面的 clear 取消——
+          // 在此立即补发进程组 SIGKILL，保证 TERM→KILL 纪律（killGroup 对已死组捕获忽略）。
+          try { killGroup('SIGKILL'); } catch { /* 已死 */ }
+        }
         if (timer !== null) clearTimeout(timer);
         if (closeFallbackTimer !== null) clearTimeout(closeFallbackTimer);
         for (const t of escalationTimers) clearTimeout(t);
@@ -185,25 +191,27 @@ export class ClaudeRunner {
             committedText += inflightAuthoritative ?? '';
           }
           currentMsgId = msgId;
-          const authoritative: string[] = [];
+          // 有序扫描：可见快照只累计到首个 AskUserQuestion 为止（同消息内问题后文本不泄漏进卡流）；
+          // 全量累计（含问题后文本）仍写入 inflightAuthoritative 供最终 outputText。
+          const allText: string[] = [];
+          const preVisible: string[] = [];
           for (const block of ev.message.content as any[]) {
-            if (block?.type === 'text' && typeof block.text === 'string') authoritative.push(block.text);
-          }
-          inflightAuthoritative = authoritative.join(''); // 权威替换 partial；无 text 块亦重置为 ''（防旧消息文本被重复提交）
-          inflightPartial = null;
-          // 同消息保序：text 块按序流出；遇到问题 tool_use 后抑制（不补发快照——前置 text 已按序 enqueue）
-          for (const block of ev.message.content as any[]) {
-            if (block?.type === 'text' && !questionSeen) {
-              const snapshot = fullText();
-              enqueueEmit(() => cbs.onText?.(snapshot));
-            }
-            if (block?.type === 'tool_use' && block.name === 'AskUserQuestion' && !questionSeen) {
+            if (block?.type === 'text' && typeof block.text === 'string') {
+              allText.push(block.text);
+              if (!questionSeen) {
+                preVisible.push(block.text);
+                const snapshot = committedText + preVisible.join('');
+                enqueueEmit(() => cbs.onText?.(snapshot));
+              }
+            } else if (block?.type === 'tool_use' && block.name === 'AskUserQuestion' && !questionSeen) {
               questionSeen = true;
               const qs = Array.isArray(block.input?.questions) ? block.input.questions : [];
               const payload: AskUserQuestionPayload = { toolUseId: String(block.id ?? ''), questions: qs };
               enqueueEmit(() => cbs.onQuestion?.(payload));
             }
           }
+          inflightAuthoritative = allText.join(''); // 权威替换 partial；无 text 块亦重置为 ''（防旧消息文本被重复提交）
+          inflightPartial = null;
           return;
         }
         if (ev?.type === 'stream_event' && ev.event?.type === 'content_block_delta'
@@ -223,8 +231,9 @@ export class ClaudeRunner {
       };
       // 行协议解析：手工 buffer split（兼容注入的 fake 流——仅 data/close 事件）
       let buf = '';
+      const decoder = new StringDecoder('utf8'); // 多字节 UTF-8 跨 chunk 不破坏（中文回复保真）
       child.stdout!.on('data', (chunk: Buffer) => {
-        buf += chunk.toString();
+        buf += decoder.write(chunk);
         let idx = buf.indexOf('\n');
         while (idx >= 0) {
           handleLine(buf.slice(0, idx));
@@ -233,6 +242,7 @@ export class ClaudeRunner {
         }
       });
       child.stdout!.on('close', () => {
+        buf += decoder.end();
         if (buf.trim() !== '') handleLine(buf);
         stdoutClosed = true;
         if (exitInfo !== null) settleOnExit();

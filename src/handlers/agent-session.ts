@@ -56,7 +56,6 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       deps.logger.warn('session', `重复 msgId=${m.msgId}，丢弃`);
       return;
     }
-    rememberMsgId(m.msgId);
 
     const text = m.conversationKind === 'group' ? stripLeadingMention(m.textContent) : m.textContent;
     if (text.trim() === '') {
@@ -79,6 +78,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
         prompt = `${contextPrefix}\n${parsed.answerText}`;
       } else {
         await sendMarkdown(m, parsed.message); // help：不进 agent，pending 保留
+        rememberMsgId(m.msgId); // 发送成功才记去重——失败时 adapter 重试可重发（不吞必达响应）
         return;
       }
     }
@@ -167,6 +167,9 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
     if (!enqueued) {
       deps.logger.warn('session', `chat=${chatKey} 忙线，拒绝 msgId=${m.msgId}`);
       await sendMarkdown(m, BUSY_TEXT);
+      rememberMsgId(m.msgId); // 忙线提示送达才记去重（失败 → adapter 重试重发）
+    } else {
+      rememberMsgId(m.msgId); // 已入队（自身会去重执行路径）；直发/入队失败均不记，重试可重入
     }
   };
 }

@@ -83,6 +83,7 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
     enqueue: (k: string, j: () => Promise<void>) => realQueue.enqueue(k, j),
     depthOf: (k: string) => realQueue.depthOf(k),
     waitIdle: (k: string) => realQueue.waitIdle(k),
+    drainActive: () => { order.push('queue.drain'); return realQueue.drainActive(); },
     close: () => { order.push('queue.close'); realQueue.close(); },
     closed: false,
   } as unknown as TurnQueue;
@@ -101,10 +102,12 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
   client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'm2' });   // 回合 2 排队
   await new Promise((r) => setTimeout(r, 50));
   expect(started).toBe(1);
-  await expect(capturedShutdown!('SIGTERM')).rejects.toThrow('exit-sentinel'); // 触发真实关停（exit 哨兵止步）
+  // 触发真实关停：drainActive 会等在飞 job 收尾——释放必须与 shutdown 并发（fake killAll 不中止 fake run）
+  const shutdownPromise = capturedShutdown!('SIGTERM');
   release.release();
+  await expect(shutdownPromise).rejects.toThrow('exit-sentinel'); // exit 哨兵止步（关停完整走完）
   await new Promise((r) => setTimeout(r, 50));
-  expect(order).toEqual(['queue.close', 'runner.killAll']);
+  expect(order).toEqual(['queue.close', 'runner.killAll', 'queue.drain']);
   expect(exits).toEqual([0]);
   expect(started).toBe(1);                                     // 排队回合被 close 丢弃，未 spawn
 });
