@@ -1306,16 +1306,16 @@ const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 起生效�
 - Modify: `SPEC.md`（D3 节回填 `CI-verified` 标注）
 - 验证 `docs/issues/3/plan.md` checkbox 与实际状态一致
 
-- [ ] **Step 1: 安装与门禁**（G7）— Run: `bun install && bun run typecheck && bun test` Expected: typecheck 零错误、全部测试 PASS
-- [ ] **Step 2: 构建冒烟** — Run: `bun run build && bun run check:dist` Expected: PASS
-- [ ] **Step 3: SPEC 回填** — 门禁全绿后，在 SPEC.md D3 节各契约条目句尾追加 `（CI-verified）`（对照 D1/D2 节标注样式；live 项保持"live 验证清单"措辞不标）
-- [ ] **Step 4: AC 追溯核对**（逐条对照测试名）：
+- [x] **Step 1: 安装与门禁**（G7）— Run: `bun install && bun run typecheck && bun test` Expected: typecheck 零错误、全部测试 PASS
+- [x] **Step 2: 构建冒烟** — Run: `bun run build && bun run check:dist` Expected: PASS
+- [x] **Step 3: SPEC 回填** — 门禁全绿后，在 SPEC.md D3 节各契约条目句尾追加 `（CI-verified）`（对照 D1/D2 节标注样式；live 项保持"live 验证清单"措辞不标）
+- [x] **Step 4: AC 追溯核对**（逐条对照测试名）：
   - AC1 → `dispatch.test.ts` "四命令在 p2p 与群 @ 都被网关拦截" + "AC1 e2e: dispatch × 真实 executor" + `commands.test.ts` 四命令行为用例 + `run.test.ts` "dispatch 装配" ✓
   - AC2 → `dispatch.test.ts` "陌生 p2p 收到固定拒绝文本" + "access.json 损坏 → admin 也拒" ✓
   - AC3 → `dispatch.test.ts` "白名单群 @ 路由到 agent" ✓
   - AC4 → `dispatch.test.ts` "非白名单群 @ 零回复 + warn" ✓
   - G3 对账竞态 → `agent-session.test.ts` "D3 /new 竞态" 集成用例（Task 2 落地——在飞与排队消息跨 reset 后 `store.load` 为 null、后续消息 resume=false）✓
-- [ ] **Step 5: Commit** — `git add SPEC.md docs/issues/3 && git commit -m "docs(d3): 门禁全绿后回填 CI-verified + AC 追溯收口"`
+- [x] **Step 5: Commit** — `git add SPEC.md docs/issues/3 && git commit -m "docs(d3): 门禁全绿后回填 CI-verified + AC 追溯收口"`
 
 （/new 竞态集成用例已在 Task 7 Step 2 落地，此处仅追溯核对。）
 
