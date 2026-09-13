@@ -35,7 +35,7 @@
 **Interfaces:**
 - Produces: npm 包 `@jacky402615/dingtalkbot`（bin `dingtalkbot` → `dist/cli.js`）；脚本 `build`/`check:dist`/`typecheck`/`test`；依赖 `dingtalk-stream` exact 2.1.5。typecheck 覆盖 `src` + `scripts` + `tests`（测试类型漂移不漏检）。
 
-- [ ] **Step 1: 写 package.json / tsconfig / .gitignore**
+- [x] **Step 1: 写 package.json / tsconfig / .gitignore**
 
 ```json
 // package.json
@@ -91,9 +91,9 @@ dist/
 *.log
 ```
 
-- [ ] **Step 2: 安装依赖** — Run: `bun install && bun add -E dingtalk-stream@2.1.5` Expected: `bun.lock` 生成，`node_modules/dingtalk-stream/package.json` 的 `version` 为 `2.1.5`。
+- [x] **Step 2: 安装依赖** — Run: `bun install && bun add -E dingtalk-stream@2.1.5` Expected: `bun.lock` 生成，`node_modules/dingtalk-stream/package.json` 的 `version` 为 `2.1.5`。
 
-- [ ] **Step 3: 写失败测试** `tests/unit/scaffold.test.ts`
+- [x] **Step 3: 写失败测试** `tests/unit/scaffold.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -110,11 +110,11 @@ test('scaffold: 包身份与依赖 pin 正确', () => {
 });
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/scaffold.test.ts` Expected: PASS（1 test）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/scaffold.test.ts` Expected: PASS（1 test）。
 
-- [ ] **Step 5: README 骨架** — 写一句定位 + CLI 表 + 指向 SPEC.md（内容在 Task 12 充实）。
+- [x] **Step 5: README 骨架** — 写一句定位 + CLI 表 + 指向 SPEC.md（内容在 Task 12 充实）。
 
-- [ ] **Step 6: Commit** — `bun run typecheck && bun test && git add -A && git commit -m "chore(scaffold): package skeleton with pinned dingtalk-stream 2.1.5"`
+- [x] **Step 6: Commit** — `bun run typecheck && bun test && git add -A && git commit -m "chore(scaffold): package skeleton with pinned dingtalk-stream 2.1.5"`
 
 ### Task 2: `.bot/.env` 解析（src/env.ts）
 
