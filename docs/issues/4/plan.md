@@ -40,7 +40,7 @@
 **Interfaces:**
 - Produces: `class MediaClient { constructor(opts: MediaClientOptions); exchangeDownloadUrl(robotCode: string, downloadCode: string, signal?: AbortSignal): Promise<string> }`——结构满足 Task 3 定义的 `MediaExchangeClient`（Task 7 装配消费）。
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/media-client.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/media-client.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -103,8 +103,8 @@ test('media-client: 外部 signal 透传给 fetch（服务层 30s 总 deadline �
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/media-client.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/openapi/media.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/media-client.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/openapi/media.ts`：
 
 ```ts
 import type { Logger } from '../logger.js';
@@ -157,8 +157,8 @@ export class MediaClient {
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/media-client.test.ts` Expected: PASS（3 tests）
-- [ ] **Step 5: Commit** — `git add src/openapi/media.ts tests/unit/media-client.test.ts && git commit -m "feat(d4): MediaClient——downloadCode 换临时下载 URL（token/deline/可注入）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/media-client.test.ts` Expected: PASS（3 tests）
+- [x] **Step 5: Commit** — `git add src/openapi/media.ts tests/unit/media-client.test.ts && git commit -m "feat(d4): MediaClient——downloadCode 换临时下载 URL（token/deline/可注入）"`
 
 ---
 
