@@ -1209,7 +1209,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
 - Produces: `TokenManager`：`getAccessToken(): Promise<string>`（内存→磁盘→远端，single-flight）；`invalidate()`；`fetchCallCount`。`TokenCache { key, accessToken, expiresAt }`——**key=clientId 指纹，凭据轮换时旧缓存失效**。`normalizeExpiry(expireIn)`（ms/s 歧义归一：`>200_000` 视为 ms）。端点 `POST https://api.dingtalk.com/v1.0/oauth2/accessToken`，body `{appKey, appSecret}`；到期前 `refreshMarginMs`（默认 5min）刷新；磁盘缓存 `.bot/token.json` 0600 原子写，写失败降级仅内存（warn）。
 - Consumes: `Logger`（Task 4）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/token.test.ts
@@ -1312,9 +1312,9 @@ test('非 2xx：带响应体的响亮错误', async () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/token.test.ts` Expected: FAIL — `Cannot find module`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/token.test.ts` Expected: FAIL — `Cannot find module`。
 
-- [ ] **Step 3: 实现** `src/openapi/token.ts`
+- [x] **Step 3: 实现** `src/openapi/token.ts`
 
 ```ts
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -1432,9 +1432,9 @@ export class TokenManager {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/token.test.ts` Expected: PASS（6 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/token.test.ts` Expected: PASS（6 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/token.ts tests/unit/token.test.ts && git commit -m "feat(openapi): single-flight token manager with credential-scoped disk cache"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/token.ts tests/unit/token.test.ts && git commit -m "feat(openapi): single-flight token manager with credential-scoped disk cache"`
 
 ### Task 9: Robot 回复 client（src/openapi/robot.ts）
 
