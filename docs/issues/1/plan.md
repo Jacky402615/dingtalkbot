@@ -1576,7 +1576,7 @@ export class RobotReplyer {
 - Consumes: `RobotReplyer`（Task 9）、`InboundRobotMessage`/`MessageHandler`/`DingtalkTransport`（Task 6）、`DingtalkSdkTransport`（Task 7）、`writeStateJson`（Task 5）、`Logger`。
 - Produces: `createEchoHandler({replyer, logger}): MessageHandler`（非 text/空文本 → **warn** 日志丢弃；p2p→`sendOtoMarkdown(robotCode,[senderStaffId])`；group→`sendGroupMarkdown(robotCode, conversationId)`——openConversationId==conversationId 为 live-smoke 待验证假设；unknown→warn 丢弃）；`Gateway { start/stop }`（onStateChange→state.json 快照；handler 可插拔；**启动失败在 stop 清理后向外抛**）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/echo.test.ts
@@ -1757,9 +1757,9 @@ test('round-trip: 回复持续 500 → 3 次重试后 ack handler-failed（不�
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/echo.test.ts tests/unit/gateway.test.ts tests/integration/round-trip.test.ts` Expected: FAIL — `Cannot find module`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/echo.test.ts tests/unit/gateway.test.ts tests/integration/round-trip.test.ts` Expected: FAIL — `Cannot find module`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // src/handlers/echo.ts
@@ -1843,9 +1843,9 @@ export class Gateway {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/echo.test.ts tests/unit/gateway.test.ts tests/integration/round-trip.test.ts` Expected: PASS（9 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/echo.test.ts tests/unit/gateway.test.ts tests/integration/round-trip.test.ts` Expected: PASS（9 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/handlers/echo.ts src/gateway.ts tests/ && git commit -m "feat(gateway): thin gateway assembly with pluggable markdown echo handler"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/handlers/echo.ts src/gateway.ts tests/ && git commit -m "feat(gateway): thin gateway assembly with pluggable markdown echo handler"`
 
 **--- 检查点 B：端到端核心环完成（adapter/token/replyer/echo/gateway + 全链路集成测试全绿）---**
 
