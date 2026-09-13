@@ -1153,7 +1153,7 @@ mediaMaxBytes: 20 * 1024 * 1024, // D4：单文件与每消息聚合共用上限
 - Consumes: `MediaHandler` / `MediaOutcome`（Task 3）；`TurnQueue.depthOf`（既有 `src/agent/turn-queue.ts:17`——与 enqueue 容量谓词同源：enqueue 拒绝条件 `q.depth >= maxPerChat`，`depthOf` 即 `q.depth`）
 - Produces: `AgentHandlerDeps.media: MediaHandler`（Task 7 装配/注入消费）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/unit/agent-session.test.ts`（复用其 `msg`/`fakeRunner`/`quietLogger`；新增 `mediaHarness`——既有 `harness` 保留不动，既有用例零改动）：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/unit/agent-session.test.ts`（复用其 `msg`/`fakeRunner`/`quietLogger`；新增 `mediaHarness`——既有 `harness` 保留不动，既有用例零改动）：
 
 ```ts
 import type { MediaOutcome } from '../../src/media/attachments.js';
@@ -1278,8 +1278,8 @@ test('D4: pendingQuestion 存在时 richText 数字文本不触发应答——�
 
 （`mkdtempSync`/`join`/`tmpdir` 已是该文件既有 import；`Logger` import 若未用可省。**既有 `harness` 同步补一行** `media: { handle: async () => null }`——`AgentHandlerDeps.media` 必填后不补会 typecheck 失败；既有用例本体零改动，默认 stub 对文本路径零行为影响。）
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/agent-session.test.ts` Expected: FAIL（deps 无 `media` 编译错，或图片消息被既有"非文本丢弃"分支吃掉）
-- [ ] **Step 3: Write the minimal implementation** — `src/handlers/agent-session.ts`（完整新入口——替换 `return async (m) => {...}` 的开头段至 `enqueue` 调用前；`enqueue` job 体与 busy 兜底原样保留）：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/agent-session.test.ts` Expected: FAIL（deps 无 `media` 编译错，或图片消息被既有"非文本丢弃"分支吃掉）
+- [x] **Step 3: Write the minimal implementation** — `src/handlers/agent-session.ts`（完整新入口——替换 `return async (m) => {...}` 的开头段至 `enqueue` 调用前；`enqueue` job 体与 busy 兜底原样保留）：
 
 ```ts
 // imports 增：
@@ -1435,8 +1435,8 @@ return async (m: InboundRobotMessage) => {
 
 （job 体唯一类型适配：`text` 由 `string` 放宽为 `string | null` 后，"应答目标被覆盖降级"分支的模板字面量补 `?? ''`——该分支仅在 answerTurn（必为 text 消息）下可达，运行时行为逐字节不变；其余全部与现源一致。`randomUUID`/`SessionRecord`/`AiCardBridge`/`AskUserQuestionPayload`/`renderQuestionList` 均为该文件既有 import。）
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/agent-session.test.ts` Expected: PASS（新增 6 用例 + 既有全部用例不回归——G9 的文本路径由既有精确断言用例兜底）
-- [ ] **Step 5: Commit** — `git add src/handlers/agent-session.ts tests/unit/agent-session.test.ts && git commit -m "feat(d4): agent-session 媒体入口分流——忙线预检/AC4 错误路径/注记进 prompt（AC1-AC3 面）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/agent-session.test.ts` Expected: PASS（新增 6 用例 + 既有全部用例不回归——G9 的文本路径由既有精确断言用例兜底）
+- [x] **Step 5: Commit** — `git add src/handlers/agent-session.ts tests/unit/agent-session.test.ts && git commit -m "feat(d4): agent-session 媒体入口分流——忙线预检/AC4 错误路径/注记进 prompt（AC1-AC3 面）"`
 
 ---
 

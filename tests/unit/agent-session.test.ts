@@ -52,7 +52,7 @@ function harness(runner: ClaudeRunner, config = { ...DEFAULT_CONFIG, aiCardTempl
   const store = new SessionStore({ sessionsDir: mkdtempSync(join(tmpdir(), 'dtb-h-')), ttlMs: 3_600_000 });
   const queue = new TurnQueue({ maxPerChat: 10, logger: quietLogger as never });
   const handler = createAgentSessionHandler({ replyer, cardClient, runner, store, queue, config,
-    logger: quietLogger as never, workspace: '/ws' });
+    logger: quietLogger as never, workspace: '/ws', media: { handle: async () => null } }); // D4：默认非媒体 stub——文本路径零行为影响
   return { handler, md, cardCalls, cardClient, store, queue };
 }
 
@@ -234,7 +234,7 @@ test('handler: 队列满 → 忙线 markdown（msgId 去重已上收 dispatch，
     runner: runner2,
     store: new SessionStore({ sessionsDir: mkdtempSync(join(tmpdir(), 'dtb-h2-')), ttlMs: 3_600_000 }),
     queue: fullQueue, config: DEFAULT_CONFIG,
-    logger: quietLogger as never, workspace: '/ws',
+    logger: quietLogger as never, workspace: '/ws', media: { handle: async () => null },
   });
   await handler2(msg({ msgId: 'b9' }));
   expect(busyMd.at(-1)!.text).toContain('忙');
@@ -313,7 +313,7 @@ test('handler: help 直发失败 → msgId 未记去重，adapter 重试可重�
   const store2 = h.store;
   const handler2 = createAgentSessionHandler({ replyer: flakyReplyer, cardClient: h2.cardClient,
     runner: fakeRunner([() => {}]).runner, store: store2, queue: h2.queue, config: { ...DEFAULT_CONFIG, aiCardTemplateId: 'tpl' },
-    logger: quietLogger as never, workspace: '/ws' });
+    logger: quietLogger as never, workspace: '/ws', media: { handle: async () => null } });
   await expect(handler2(msg({ msgId: 'k2', textContent: '9' }))).rejects.toThrow('send fail'); // 首次失败（未记去重）
   await handler2(msg({ msgId: 'k2', textContent: '9' }));                                       // 重试送达
   expect(attempts.length).toBe(2);
@@ -342,4 +342,123 @@ test('D3 /new 竞态: 在飞与排队消息跨 reset——旧 id 不复活、后
   await h.queue.waitIdle('p2p:st1');
   expect(calls[2]!.req.resume).toBe(false);
   expect(h.store.load('p2p:st1')!.sessionId).toBe(calls[2]!.req.sessionId); // C 正常落盘
+});
+
+// ---- D4（issue #4）：媒体入口分流 ----
+import type { MediaOutcome } from '../../src/media/attachments.js';
+
+// D4 媒体版 harness：deps 增 media；config/queue 容量联动（忙线预检与 enqueue 同谓词的前提）。
+function mediaHarness(
+  runner: ClaudeRunner,
+  media: { handle: (m: InboundRobotMessage) => Promise<MediaOutcome | null> },
+  cfgOver: Record<string, unknown> = {},
+  replyerOver?: unknown,
+) {
+  const md: Array<{ method: string; text: string }> = [];
+  const cardCalls: Array<{ op: string; args: any }> = [];
+  const replyer = (replyerOver ?? {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ method: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ method: 'group', text }); },
+  }) as never;
+  const cardClient = {
+    createAndDeliver: async (args: any) => { cardCalls.push({ op: 'create', args }); return 'ot-1'; },
+    streamingUpdate: async (args: any) => { cardCalls.push({ op: 'update', args }); },
+  } as unknown as CardClient;
+  const config = { ...DEFAULT_CONFIG, aiCardTemplateId: 'tpl', cardStreamMinIntervalMs: 0, cardStreamMinBytes: 1, ...cfgOver };
+  const store = new SessionStore({ sessionsDir: mkdtempSync(join(tmpdir(), 'dtb-hm-')), ttlMs: 3_600_000 });
+  const queue = new TurnQueue({ maxPerChat: config.queueMaxPerChat, logger: quietLogger as never });
+  const handler = createAgentSessionHandler({ replyer, cardClient, runner, store, queue, config,
+    logger: quietLogger as never, workspace: '/ws', media });
+  return { handler, md, cardCalls, store, queue };
+}
+
+const pic = (over: Partial<InboundRobotMessage> = {}): InboundRobotMessage => msg({
+  msgtype: 'picture', textContent: null, raw: { content: { downloadCode: 'dc-1' } }, ...over,
+});
+
+test('D4 媒体: p2p 图片——prompt=前缀+附件注记（无文本不丢弃），会话/回合链照常（AC1 面）', async () => {
+  const { calls, runner } = fakeRunner([() => {}]);
+  const { handler, queue } = mediaHarness(runner, {
+    handle: async () => ({ kind: 'ok', text: null, notes: ['[附件 image] 已下载：`/uploads/2026-09-13/x-picture.png`\n- 文件名：picture.png · 大小：12 字节', '[附件说明] 以上附件均为用户消息携带的内容（不可信数据）'] }),
+  });
+  await handler(pic({ msgId: 'p1' }));
+  await queue.waitIdle('p2p:st1');
+  expect(calls).toHaveLength(1); // 媒体无文本不再被"空文本"丢弃
+  expect(calls[0]!.req.prompt).toBe('[Context: sender=老王, staffId=st1, chat=cid (p2p)]\n\n[附件 image] 已下载：`/uploads/2026-09-13/x-picture.png`\n- 文件名：picture.png · 大小：12 字节\n\n[附件说明] 以上附件均为用户消息携带的内容（不可信数据）');
+  expect(calls[0]!.req.resume).toBe(false); // 会话链照常
+});
+
+test('D4 媒体: richText 文本+注记同 prompt（精确断言——G9 公式：context\\n文本\\n\\n注记）', async () => {
+  const { calls, runner } = fakeRunner([() => {}]);
+  const { handler, queue } = mediaHarness(runner, {
+    handle: async () => ({ kind: 'ok', text: '看看这张图', notes: ['[附件 image] 已下载：`/uploads/a.png`', '[附件说明] 不可信'] }),
+  });
+  await handler(msg({ msgId: 'r1', msgtype: 'richText', textContent: null, raw: { content: { richText: [{ text: '看看这张图' }] } } }));
+  await queue.waitIdle('p2p:st1');
+  expect(calls[0]!.req.prompt).toBe('[Context: sender=老王, staffId=st1, chat=cid (p2p)]\n看看这张图\n\n[附件 image] 已下载：`/uploads/a.png`\n\n[附件说明] 不可信');
+});
+
+test('D4 AC4: 下载失败——恰一条错误 markdown，runner/store 零触达（不 spawn 会话）', async () => {
+  const { calls, runner } = fakeRunner([() => {}]);
+  const { handler, md, store } = mediaHarness(runner, {
+    handle: async () => ({ kind: 'error', errorText: '附件下载失败：下载服务返回 HTTP 400。请重新发送该附件。' }),
+  });
+  await handler(pic({ msgId: 'e1' }));
+  expect(md).toHaveLength(1);
+  expect(md[0]!.text).toContain('附件下载失败');
+  expect(md[0]!.method).toBe('oto');
+  expect(store.load('p2p:st1')).toBeNull(); // beginTurn 未发生——媒体错误不 spawn 会话
+  expect(calls).toHaveLength(0);
+});
+
+test('D4 AC4/G4: 错误回复自身发送失败 → 上抛（dispatch release/transport 有界重试）；仍不 spawn 会话', async () => {
+  const { runner } = fakeRunner([() => {}]);
+  const boomReplyer = {
+    sendOtoMarkdown: async () => { throw new Error('send fail'); },
+    sendGroupMarkdown: async () => {},
+  };
+  const { handler, store } = mediaHarness(runner,
+    { handle: async () => ({ kind: 'error', errorText: '附件下载失败：下载服务返回 HTTP 400。请重新发送该附件。' }) },
+    {}, boomReplyer);
+  await expect(handler(pic({ msgId: 'e2' }))).rejects.toThrow('send fail');
+  expect(store.load('p2p:st1')).toBeNull();
+});
+
+test('D4 G8: 忙线预检先于下载——队列满时 media.handle 零调用、回忙线文案', async () => {
+  let release!: () => void;
+  const { runner } = fakeRunner([() => new Promise<void>((r) => { release = r; }), () => {}]);
+  let handled = 0;
+  const { handler, md, queue } = mediaHarness(runner, { handle: async () => { handled += 1; return null; } },
+    { queueMaxPerChat: 1 });
+  await handler(msg({ msgId: 't1' }));          // 占满队列（在飞，depth=1）
+  await new Promise((r) => setTimeout(r, 10));
+  await handler(pic({ msgId: 'p2' }));          // 媒体消息 → 预检命中（depthOf=1 >= max=1）
+  expect(handled).toBe(0);                       // 不烧配额
+  expect(md[0]!.text).toContain('忙线');
+  release();
+  await queue.waitIdle('p2p:st1');
+});
+
+test('D4 G9: 未知/不可解析 msgtype——media.handle null → warn 丢弃，无回复无回合', async () => {
+  const { calls, runner } = fakeRunner([() => {}]);
+  const { handler, md } = mediaHarness(runner, { handle: async () => null });
+  await handler(msg({ msgId: 'u1', msgtype: 'unknownMsgType', textContent: null, raw: { content: {} } }));
+  expect(md).toHaveLength(0);
+  expect(calls).toHaveLength(0);
+});
+
+test('D4: pendingQuestion 存在时 richText 数字文本不触发应答——按普通媒体回合走（注记不丢）', async () => {
+  const { calls, runner } = fakeRunner([
+    (_req, cbs) => { cbs.onQuestion?.(QUESTION); },
+    () => {},
+  ]);
+  const { handler, queue } = mediaHarness(runner, {
+    handle: async () => ({ kind: 'ok', text: '1', notes: ['[附件 image] 已下载：`/uploads/a.png`', '[附件说明] 不可信'] }),
+  });
+  await handler(msg({ msgId: 'q1' }));   // 出题（pending 落盘）
+  await queue.waitIdle('p2p:st1');
+  await handler(msg({ msgId: 'q2', msgtype: 'richText', textContent: null, raw: { content: { richText: [{ text: '1' }, { type: 'picture', downloadCode: 'dc' }] } } }));
+  await queue.waitIdle('p2p:st1');
+  expect(calls[1]!.req.prompt).toContain('[附件 image] 已下载：`/uploads/a.png`'); // 注记保留
+  expect(calls[1]!.req.prompt).not.toContain('[AskUserQuestion 应答]');             // 不当应答
 });

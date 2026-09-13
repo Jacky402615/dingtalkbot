@@ -65,7 +65,8 @@ function assemble(runner: unknown, fetchFn: typeof fetch, configOver: Record<str
   const store = new SessionStore({ sessionsDir: paths.sessionsDir, ttlMs: 3_600_000 });
   const queue = new TurnQueue({ maxPerChat: 10, logger: quiet });
   const handler = createAgentSessionHandler({ replyer, cardClient, runner: runner as ClaudeRunner, store, queue,
-    config: { ...DEFAULT_CONFIG, aiCardTemplateId: 'tpl-9', cardStreamMinIntervalMs: 0, cardStreamMinBytes: 1, ...configOver }, logger: quiet, workspace: ws });
+    config: { ...DEFAULT_CONFIG, aiCardTemplateId: 'tpl-9', cardStreamMinIntervalMs: 0, cardStreamMinBytes: 1, ...configOver }, logger: quiet, workspace: ws,
+    media: { handle: async () => null } });
   const transport = new DingtalkSdkTransport({ clientId: 'ck', clientSecret: 'cs', logger: quiet,
     handlerRetryDelayMs: 1, backoffBaseMs: 5, clientFactory: () => client });
   const gateway = new Gateway({ transport, logger: quiet, stateFile: paths.stateFile, pid: process.pid, startedAt: 'T', handler });
