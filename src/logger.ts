@@ -1,5 +1,5 @@
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -32,10 +32,14 @@ export function createFileLogger(logsDir: string): { logger: Logger; logFilePath
     logFilePath = join(logsDir, `${runId()}-${seq}.log`);
   }
   const minLevel: LogLevel = process.env.DEBUG ? 'debug' : 'info';
+  const latestLink = join(logsDir, 'latest.log');
+  let copyFallback = false; // 符号链接不可用时退化为复制，且随写保持同步
   const write = (level: LogLevel, module: string, msg: string, extra?: unknown) => {
     if (ORDER[level] < ORDER[minLevel]) return;
+    const line = lineOf(level, module, msg, extra) + '\n';
     try {
-      appendFileSync(logFilePath, lineOf(level, module, msg, extra) + '\n');
+      appendFileSync(logFilePath, line);
+      if (copyFallback) copyFileSync(logFilePath, latestLink);
     } catch (err) {
       console.error(`[logger] 日志写入失败（不遮蔽业务错误）: ${String(err)}`);
     }
@@ -47,12 +51,13 @@ export function createFileLogger(logsDir: string): { logger: Logger; logFilePath
     error: (m, msg, e) => write('error', m, msg, e),
   };
   function linkLatest(): void {
-    const link = join(logsDir, 'latest.log');
     try {
-      if (existsSync(link)) rmSync(link);
-      symlinkSync(logFilePath, link);
+      if (existsSync(latestLink)) rmSync(latestLink);
+      // 符号链接目标必须是绝对路径：相对 logsDir 时，相对 target 会按链接所在目录再解析一次
+      const absTarget = isAbsolute(logFilePath) ? logFilePath : resolve(logFilePath);
+      symlinkSync(absTarget, latestLink);
     } catch {
-      try { copyFileSync(logFilePath, link); } catch (err) { console.error(`[logger] latest.log 链接/复制失败: ${String(err)}`); }
+      try { copyFileSync(logFilePath, latestLink); copyFallback = true; } catch (err) { console.error(`[logger] latest.log 链接/复制失败: ${String(err)}`); }
     }
   }
   return { logger, logFilePath, linkLatest };

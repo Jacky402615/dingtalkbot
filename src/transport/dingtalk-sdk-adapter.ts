@@ -33,8 +33,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
   private state: TransportState = 'stopped';
   private stopped = true;
   private client: DwClientLike | null = null;
-  private firstResolve: (() => void) | null = null;
-  private firstReject: ((err: Error) => void) | null = null;
+  private firstReject: ((err: Error) => void) | null = null; // stop() 用它结算当前未决的 start()
   private dropSignal: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0; // supervisor 代际：stop()/restart() 使旧代循环就地退出，不复活
@@ -61,8 +60,13 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     client.registerCallbackListener(TOPIC_ROBOT, (downstream) => { void this.handleDownstream(downstream); });
     this.stopped = false;
     this.generation += 1;
-    const first = new Promise<void>((resolve, reject) => { this.firstResolve = resolve; this.firstReject = reject; });
-    void this.supervise(client, this.generation);
+    const gen = this.generation;
+    let resolveFirst!: () => void;
+    let rejectFirst!: (err: Error) => void;
+    const first = new Promise<void>((resolve, reject) => { resolveFirst = resolve; rejectFirst = reject; });
+    this.firstReject = (err) => rejectFirst(err); // stop() 结算的是"当前未决"的 start
+    // settle 按代闭包传递：旧代 supervisor 只能结算自己那代（已结算的 Promise 再结算为 no-op）
+    void this.supervise(client, gen, resolveFirst, rejectFirst);
     return first;
   }
 
@@ -74,7 +78,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     try { this.client?.disconnect(); } catch (err) { this.opts.logger.error('transport', `disconnect 出错（继续）: ${String(err)}`); }
     const err = new TransportStoppedError('transport 已被 stop()');
     this.firstReject?.(err); // 结算未决的 start()，防悬挂
-    this.firstResolve = null; this.firstReject = null;
+    this.firstReject = null;
     this.setState('stopped', 'stop() 调用');
     this.client = null;
   }
@@ -85,12 +89,13 @@ export class DingtalkSdkTransport implements DingtalkTransport {
 
   private watchSocket(client: DwClientLike): void {
     try {
-      const socket = client.socket; // 代际守卫：旧 socket 的迟到事件不唤醒新连接
+      const socket = client.socket; // 代际守卫：旧 socket / 旧 client 的迟到事件不唤醒新连接
       if (socket === null) return;
-      socket.on('close', () => { if (client.socket === socket) this.dropSignal?.(); }); // 立即唤醒重连
+      const current = (): boolean => this.client === client && client.socket === socket;
+      socket.on('close', () => { if (current()) this.dropSignal?.(); }); // 立即唤醒重连
       socket.on('error', (err) => {
         this.opts.logger.error('transport', `socket error: ${String(err)}`);
-        if (client.socket === socket) this.dropSignal?.(); // SDK terminate→close 兜底外再显式唤醒
+        if (current()) this.dropSignal?.(); // SDK terminate→close 兜底外再显式唤醒
       });
     } catch (err) {
       this.opts.logger.warn('transport', `socket 监听挂载失败（仅靠 watchdog 轮询）: ${String(err)}`);
@@ -104,7 +109,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     });
   }
 
-  private async supervise(client: DwClientLike, gen: number): Promise<void> {
+  private async supervise(client: DwClientLike, gen: number, resolveFirst: () => void, rejectFirst: (err: Error) => void): Promise<void> {
     const startTimeoutMs = this.opts.startTimeoutMs ?? 30_000;
     const registeredWaitMs = this.opts.registeredWaitMs ?? 5_000;
     const baseMs = this.opts.backoffBaseMs ?? 1_000;
@@ -128,17 +133,18 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         await this.withTimeout(client.connect(), timeoutMs, 'connect()');
       } catch (err) {
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
+        try { client.disconnect(); } catch { /* 序列化尝试：废弃半途连接的残留 socket/状态 */ }
       }
       if (!alive()) return; // stop/重启：本代 supervisor 就地退出
       this.watchSocket(client);
       const ok = await this.waitForRegistered(client, registeredWaitMs, now);
+      if (!alive()) return; // 等待注册期间被 stop/重启：迟到的注册不得结算新代
       // 首次注册也受 deadline 约束：迟到（在 registeredWaitMs 内完成但已过线）同样响亮失败
       if (ok && (firstRegisteredDone || now() < deadline)) {
         firstRegisteredDone = true;
         attempt = 0;
         this.setState('connected', '已连接并订阅');
-        this.firstResolve?.();
-        this.firstResolve = null; this.firstReject = null;
+        resolveFirst();
         await this.awaitDrop(client, pollMs); // socket close 信号优先；轮询双保险
         if (!alive()) return;
         this.setState('reconnecting', '检测到断线');
@@ -148,8 +154,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         this.setState('stopped', detail);
         this.stopped = true;
         try { client.disconnect(); } catch { /* 已断 */ }
-        this.firstReject?.(new TransportStartError(`dingtalk-stream 连接超时: ${detail}`));
-        this.firstResolve = null; this.firstReject = null;
+        rejectFirst(new TransportStartError(`dingtalk-stream 连接超时: ${detail}`));
         return;
       }
       attempt += 1;

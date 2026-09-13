@@ -41,6 +41,8 @@ export function loadBotEnv(botDir: string): DingtalkEnv {
 export function saveBotEnv(botDir: string, env: DingtalkEnv): void {
   const file = join(botDir, '.env');
   const content = `# dingtalkbot credentials\n${ENV_KEYS.clientId}=${env.clientId}\n${ENV_KEYS.clientSecret}=${env.clientSecret}\n`;
+  // 已存在的 0644 文件：先收紧再写，消除"写入后到 chmod 前"的可读窗口
+  try { if (existsSync(file)) chmodSync(file, 0o600); } catch { /* 尽力而为，写入后仍会再 chmod */ }
   writeFileSync(file, content, { mode: 0o600 });
   chmodSync(file, 0o600); // 覆写已有文件时 Node 不改权限位——显式收紧（planted 0644 场景）
 }

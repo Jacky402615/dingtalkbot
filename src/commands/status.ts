@@ -7,7 +7,7 @@ export function statusCommand(workspace: string): void {
   const paths = bootstrapWorkspace(workspace);
   const rec = readPidFile(paths.pidFile);
   if (rec === null) {
-    console.log('状态: 未运行（无 pidfile）');
+    console.log(existsSync(paths.pidFile) ? '状态: 未运行（pidfile 损坏——请手动清理）' : '状态: 未运行（无 pidfile）');
     return;
   }
   const alive = isProcessAlive(rec.pid) && pidStartMatches(paths.pidFile, rec.pid);

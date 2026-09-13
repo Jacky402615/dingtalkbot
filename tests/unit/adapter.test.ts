@@ -42,6 +42,34 @@ test('adapter: connect() 挂起不 resolve → per-attempt 超时兜底，首次
   await t.stop();
 });
 
+test('adapter: 挂起一次后恢复——超时的尝试被 disconnect 废弃，后续尝试成功', async () => {
+  const client = new FakeDwClient();
+  client.hangConnects = 1; // 首次 connect 挂起，第二次成功
+  const t = makeTransport(client, [], { startTimeoutMs: 2_000, connectAttemptTimeoutMs: 30 });
+  await t.start(); // 不 wedge：超时 → 废弃 → 退避 → 重连成功
+  expect(client.connectCalls).toBeGreaterThanOrEqual(2);
+  expect(client.registered).toBe(true);
+  await t.stop();
+});
+
+test('adapter: stop 后立即 start——旧 supervisor 的迟到注册不得结算新 start', async () => {
+  const clients: FakeDwClient[] = [];
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 10, registeredWaitMs: 2_000, watchdogPollMs: 20,
+    sleep: async () => {},
+    clientFactory: () => { const c = new FakeDwClient(); c.registerDelayMs = 120; clients.push(c); return c; },
+  });
+  const first = t.start();  // client1（注册延迟 120ms）
+  await new Promise((r) => setTimeout(r, 30));
+  await t.stop();           // 此刻 client1 尚未 registered
+  const second = t.start(); // client2
+  await expect(first).rejects.toBeInstanceOf(TransportStoppedError);
+  await second;             // 只能由 client2 自己的注册结算
+  expect(clients[1].registered).toBe(true);
+  await t.stop();
+});
+
 test('adapter: 启动等待期间 stop() → start() 以 TransportStoppedError 结算（不悬挂）', async () => {
   const client = new FakeDwClient();
   client.failForever = true;

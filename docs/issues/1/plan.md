@@ -2544,6 +2544,20 @@ jobs:
 
 - [x] **Step 3: 终检 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add docs/issues/1/live-smoke.md && git commit -m "docs: D1 live-smoke runbook for human verification"`
 
+### Task 15: code-review 修复（执行轮 codex kind=code 发现，随修复同 commit）
+
+**Files:**
+- Modify: `src/transport/dingtalk-sdk-adapter.ts`, `src/openapi/token.ts`, `src/openapi/robot.ts`, `src/logger.ts`, `src/env.ts`, `src/pid.ts`, `src/commands/stop.ts`, `src/commands/status.ts`
+- Test: `tests/unit/adapter.test.ts`, `tests/unit/token.test.ts`, `tests/unit/robot-replyer.test.ts`, `tests/unit/logger.test.ts`, `tests/unit/commands.test.ts`
+
+**Interfaces:**
+- Consumes: Task 7/8/9/11 的模块。
+- Produces: 七项并发/安全修复——①connect 超时后 `client.disconnect()` 废弃半途尝试再退避（串行化尝试）；②start() 的 settle 函数按代闭包传入 supervise（旧代 supervisor 无法结算新代 start）、`waitForRegistered` 后补 alive() 门、socket 回调加 `this.client === client` 守卫；③token/reply fetch 加 `AbortSignal.timeout` + race 兜底（`requestTimeoutMs` 默认 15s，响亮超时错误）；④TokenManager `invalidationGen`：invalidate 与 in-flight 刷新竞态时结果不写回缓存/磁盘；⑤latest.log 符号链接 target 绝对化 + 复制回退随写同步；⑥`clearPidFile` 返回成功布尔、调用方失败告警、status/stop 区分"损坏 pidfile"与"无 pidfile"；⑦`saveBotEnv` 写前预 chmod、token tmp rename 前 chmod（消除可读窗口）。
+
+- [x] **Step 1: 修复实现**（上述七项，含回归测试：跨代结算、超时后恢复、token 超时/invalidate 竞态、replyer 超时、相对路径 latest.log、损坏 pidfile status/stop）
+- [x] **Step 2: 验证 PASS** — Run: `bun run typecheck && bun test` Expected: 全绿（64 tests）。
+- [x] **Step 3: Commit** — `git add -A && git commit -m "fix: address code-review concurrency, timeout, and permission findings"`
+
 ## 风险与缓解（显式）
 
 1. **平台载荷假设**（openConversationId、expireIn、ack 效果）：runbook 验证位 + 修正路径已写明（决策 D9/D5）；失败可见（群回显错误以非 2xx 抛出并留日志）。

@@ -95,3 +95,34 @@ test('非 2xx：带响应体的响亮错误', async () => {
   });
   await expect(tm.getAccessToken()).rejects.toThrow('InvalidAuthentication');
 });
+
+test('挂起的 token 请求按 requestTimeoutMs 响亮超时（不卡死消息处理）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const tm = new TokenManager({
+    clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'),
+    requestTimeoutMs: 40,
+    fetchFn: (async () => new Promise<never>(() => {})) as unknown as typeof fetch, // 永不返回且忽略 signal
+  });
+  await expect(tm.getAccessToken()).rejects.toThrow(/超时/);
+});
+
+test('invalidate 与 in-flight 刷新竞态：结果不写回缓存（防复活）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  const calls: Array<unknown> = [];
+  const tm = new TokenManager({
+    clientId: 'ck', clientSecret: 'cs', cacheFile,
+    fetchFn: (async () => {
+      calls.push(1);
+      await new Promise((r) => setTimeout(r, 40)); // 刷新进行中触发 invalidate
+      return new Response(JSON.stringify({ accessToken: 'T1', expireIn: 7_200 }), { status: 200 });
+    }) as unknown as typeof fetch,
+  });
+  const inFlight = tm.getAccessToken();
+  await new Promise((r) => setTimeout(r, 10));
+  tm.invalidate(); // 刷新期间失效
+  expect(await inFlight).toBe('T1'); // 发起方仍拿到结果
+  expect(await tm.getAccessToken()).toBe('T1'); // 但缓存未采纳 → 重新 fetch（第二次调用）
+  expect(calls).toHaveLength(2);
+  expect(tm.fetchCallCount).toBe(2);
+});

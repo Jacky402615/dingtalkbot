@@ -28,8 +28,13 @@ export function readPidFile(pidFile: string): PidRecord | null {
   } catch { return null; }
 }
 
-export function clearPidFile(pidFile: string): void {
-  try { if (existsSync(pidFile)) rmSync(pidFile); } catch { /* 清理失败不阻断关停 */ }
+export function clearPidFile(pidFile: string): boolean {
+  try {
+    if (existsSync(pidFile)) rmSync(pidFile);
+    return true;
+  } catch {
+    return false; // 调用方负责告警（清理失败不阻断关停，但不得静默）
+  }
 }
 
 export function pidStartMatches(pidFile: string, pid: number): boolean {

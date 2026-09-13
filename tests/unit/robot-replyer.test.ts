@@ -50,3 +50,13 @@ test('非 2xx：抛带响应体的错误（不吞）', async () => {
   });
   await expect(replyer.sendOtoMarkdown('RC', ['u'], 't', 'x')).rejects.toThrow('403');
 });
+
+test('挂起的回复请求按 requestTimeoutMs 响亮超时（60s ack 窗口内兜底）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-rep-'));
+  const replyer = new RobotReplyer({
+    tokenManager: new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'), fetchFn: tokenFetch() }),
+    requestTimeoutMs: 40,
+    fetchFn: (async () => new Promise<never>(() => {})) as unknown as typeof fetch, // 永不返回且忽略 signal
+  });
+  await expect(replyer.sendOtoMarkdown('RC', ['u'], 't', 'x')).rejects.toThrow(/超时/);
+});

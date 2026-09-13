@@ -14,8 +14,11 @@ export interface TokenManagerOptions {
   fetchFn?: typeof fetch;
   now?: () => number;
   refreshMarginMs?: number;
+  requestTimeoutMs?: number; // default 15_000：挂起的 token 请求不得卡死消息处理（60s ack 窗口）
   logger?: Logger;
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 export function normalizeExpiry(expireIn: number): number {
   // 文档歧义：v1.0 端点示意为毫秒（7200000），旧语义为秒（7200）——smoke 实测后固化
@@ -26,6 +29,7 @@ export class TokenManager {
   private cache: TokenCache | null = null;
   private inflight: Promise<string> | null = null;
   private fetchCount = 0;
+  private invalidationGen = 0; // invalidate 与 in-flight 刷新的竞态防护
   private readonly cacheKey: string;
 
   constructor(private readonly opts: TokenManagerOptions) {
@@ -44,6 +48,7 @@ export class TokenManager {
 
   invalidate(): void {
     this.cache = null;
+    this.invalidationGen += 1; // in-flight 刷新完成后不得再把结果写回缓存/磁盘
     // 磁盘也必须清：否则下次 resolveToken 会把已失效 token 从磁盘"复活"
     try {
       rmSync(this.opts.cacheFile);
@@ -55,6 +60,7 @@ export class TokenManager {
   private async resolveToken(): Promise<string> {
     const now = this.opts.now ?? Date.now;
     const margin = this.opts.refreshMarginMs ?? REFRESH_MARGIN_MS;
+    const gen = this.invalidationGen;
     const cached = this.readDisk();
     if (cached && cached.key === this.cacheKey && cached.expiresAt - now() > margin) {
       this.cache = cached;
@@ -62,13 +68,18 @@ export class TokenManager {
       return cached.accessToken;
     }
     const doFetch = this.opts.fetchFn ?? fetch;
+    const timeoutMs = this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     let resp: Response;
     try {
-      resp = await doFetch(TOKEN_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ appKey: this.opts.clientId, appSecret: this.opts.clientSecret }),
-      });
+      resp = await Promise.race([
+        doFetch(TOKEN_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ appKey: this.opts.clientId, appSecret: this.opts.clientSecret }),
+          signal: AbortSignal.timeout(timeoutMs), // 真实 fetch 的中断；race 兜底忽略 signal 的实现
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`token 请求超时 ${timeoutMs}ms`)), timeoutMs)),
+      ]);
     } catch (err) {
       throw new Error(`获取 access token 网络失败: ${String(err)}`);
     }
@@ -82,6 +93,11 @@ export class TokenManager {
     }
     this.fetchCount += 1;
     const ttlMs = normalizeExpiry(data.expireIn);
+    if (gen !== this.invalidationGen) {
+      // 等待期间被 invalidate：本次调用者仍拿到新 token，但不写回缓存/磁盘（防复活）
+      this.opts.logger?.info('token', '刷新期间被 invalidate，结果不落缓存');
+      return data.accessToken;
+    }
     this.cache = { key: this.cacheKey, accessToken: data.accessToken, expiresAt: now() + ttlMs };
     this.writeDisk(this.cache);
     // TTL/expiry 落日志：live smoke 的 expireIn 单位验证位直接引用本行（不含凭据）
@@ -104,6 +120,7 @@ export class TokenManager {
       mkdirSync(dirname(this.opts.cacheFile), { recursive: true });
       const tmp = `${this.opts.cacheFile}.tmp`;
       writeFileSync(tmp, JSON.stringify(cache), { mode: 0o600 });
+      chmodSync(tmp, 0o600); // 防 planted 0644 tmp：rename 前先收紧
       renameSync(tmp, this.opts.cacheFile);
       chmodSync(this.opts.cacheFile, 0o600); // rename 到已存在路径不继承权限位——显式收紧
     } catch (err) {

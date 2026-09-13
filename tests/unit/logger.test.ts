@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFileLogger } from '../../src/logger.js';
@@ -29,4 +29,18 @@ test('createFileLogger: DEBUG 环境变量放开 debug 级；同秒两次创建�
     const second = createFileLogger(dir); // 同一秒内再次创建（快速重启）
     expect(second.logFilePath).not.toBe(logFilePath);
   } finally { process.env.DEBUG = prev; }
+});
+
+test('createFileLogger: 相对路径 logsDir 的 latest.log 链接仍可用（绝对化 target）', () => {
+  const rel = join('.', `dtb-rel-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+  try {
+    const { logger, logFilePath, linkLatest } = createFileLogger(rel);
+    logger.info('transport', 'hello');
+    linkLatest();
+    const latest = readFileSync(join(rel, 'latest.log'), 'utf8'); // 经符号链接读到内容 = 链接有效
+    expect(latest).toContain('hello');
+    expect(existsSync(logFilePath)).toBe(true);
+  } finally {
+    rmSync(rel, { recursive: true, force: true });
+  }
 });

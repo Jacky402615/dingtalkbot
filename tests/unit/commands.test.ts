@@ -55,7 +55,7 @@ test('startCommand: pidfile 指向存活且匹配的进程 → AlreadyRunningErr
   expect(() => startCommand(ws)).toThrow(AlreadyRunningError);
 });
 
-test('statusCommand: 未运行 / 运行中+connected / 陈旧 三态输出正确', () => {
+test('statusCommand: 未运行 / 运行中+connected / 陈旧 / 损坏 四态输出正确', () => {
   const ws = mkdtempSync(join(tmpdir(), 'dtb-cmd5-'));
   const paths = bootstrapWorkspace(ws);
   expect(captureConsole(() => statusCommand(ws))).toContain('状态: 未运行（无 pidfile）');
@@ -67,4 +67,15 @@ test('statusCommand: 未运行 / 运行中+connected / 陈旧 三态输出正确
   writePidFile(paths.pidFile, 999_999_999); // 死 pid → 陈旧
   const stale = captureConsole(() => statusCommand(ws));
   expect(stale.join('\n')).toContain('（已退出/陈旧 pidfile）');
+  writeFileSync(paths.pidFile, '{corrupt'); // 损坏 → 显式区分，不冒充"无 pidfile"
+  const corrupt = captureConsole(() => statusCommand(ws));
+  expect(corrupt.join('\n')).toContain('pidfile 损坏');
+});
+
+test('stopCommand: 损坏 pidfile → 响亮清理且不发信号', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'dtb-cmd7-'));
+  const paths = bootstrapWorkspace(ws);
+  writeFileSync(paths.pidFile, '{corrupt');
+  await stopCommand(ws); // 不抛 NotRunningError（文件存在），清理并继续
+  expect(existsSync(paths.pidFile)).toBe(false);
 });
