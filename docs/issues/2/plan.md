@@ -1887,10 +1887,10 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
 - Consumes: 已实现行为（Task 1–10）。
 - Produces: 行为契约与活体验证清单。
 
-- [ ] **Step 1: SPEC.md** 追加 `## Session / Agent（D2 契约）` 与 `## AI 卡回复（D2 契约）` 两节、修订 Reply 节 echo 行为条目为"已由 D2 取代"；逐条标注 `CI-verified` / `live-verified`（待回填）。要点：per-chat 会话与 TTL 到达时判定、claude 无头回合形状（--session-id/--resume、消息域文本累计、回调串行化、进程组看门狗）、AI 卡 createAndDeliver/streaming 载荷与双阈值节流、恰好一条 markdown 回退链、AskUserQuestion 编号降级与数字应答（多题+多选降级为文字回复）、配置键全表（DEFAULT_CONFIG）、关停语义（queue.close + killAll）。
-- [ ] **Step 2: CHANGELOG** `[Unreleased]` 增 Added：agent 会话层、AI 卡流式桥、串行队列、问题桥（issue #2）。
-- [ ] **Step 3: README** 快速开始补 config.json 示例（模板 id、TTL、模型）与"卡模板创建前置"一句。
-- [ ] **Step 4: live-smoke runbook** `docs/issues/2/live-smoke.md`（中文；FLAGGED-FOR-HUMAN 项步骤化）：
+- [x] **Step 1: SPEC.md** 追加 `## Session / Agent（D2 契约）` 与 `## AI 卡回复（D2 契约）` 两节、修订 Reply 节 echo 行为条目为"已由 D2 取代"；逐条标注 `CI-verified` / `live-verified`（待回填）。要点：per-chat 会话与 TTL 到达时判定、claude 无头回合形状（--session-id/--resume、消息域文本累计、回调串行化、进程组看门狗）、AI 卡 createAndDeliver/streaming 载荷与双阈值节流、恰好一条 markdown 回退链、AskUserQuestion 编号降级与数字应答（多题+多选降级为文字回复）、配置键全表（DEFAULT_CONFIG）、关停语义（queue.close + killAll）。
+- [x] **Step 2: CHANGELOG** `[Unreleased]` 增 Added：agent 会话层、AI 卡流式桥、串行队列、问题桥（issue #2）。
+- [x] **Step 3: README** 快速开始补 config.json 示例（模板 id、TTL、模型）与"卡模板创建前置"一句。
+- [x] **Step 4: live-smoke runbook** `docs/issues/2/live-smoke.md`（中文；FLAGGED-FOR-HUMAN 项步骤化）：
   1. 前置：钉钉卡片平台创建含 AI markdown 组件（变量名 `content`）模板 → 取模板 ID 填 `ai_card_template_id`；确认应用可见范围受控（D5 风险项）。
   2. AC1：p2p 发"用一句话介绍你自己"→ 观察打字机 + 卡终态 finished；`latest.log` 查 `卡片收终` 行。
   3. AC2：60 分钟内追问"我上一句问了什么"→ 上下文保留；等 TTL 过后再问 → 新会话 + `sessions/` 文件 sessionId 变化。
@@ -1898,7 +1898,7 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
   5. AC6：日志 `卡片收终 bytes=… flushes=… suppressed=…` 行摘录——配额余量据此校准 `card_stream_min_interval_ms/min_bytes`（decisions FLAGGED 2）。
   6. AC4（可选破坏性）：临时改错模板 ID 重启 → 回复降级为一条 markdown 全文 + error 日志。
   7. 关停验证：`stop` 后确认无残留 `claude` 子进程（`pgrep -f 'claude -p'` 为空）。
-- [ ] **Step 5: 终检 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add SPEC.md CHANGELOG.md README.md docs/issues/2/live-smoke.md && git commit -m "docs: D2 behavior contract, changelog, and live-smoke runbook"`
+- [x] **Step 5: 终检 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add SPEC.md CHANGELOG.md README.md docs/issues/2/live-smoke.md && git commit -m "docs: D2 behavior contract, changelog, and live-smoke runbook"`
 
 ## 风险与缓解（显式）
 
