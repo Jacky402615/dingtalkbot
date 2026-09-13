@@ -39,6 +39,7 @@ export interface TransportOptions {
   watchdogPollMs?: number;      // default 500（socket close 信号之外的双保险轮询）
   maxHandlerAttempts?: number;  // default 3（D3 本地有界重试）
   handlerRetryDelayMs?: number; // default 500
+  handlerBudgetMs?: number;     // default 50_000：全部尝试总预算，压在 60s 重推窗口内
   connectAttemptTimeoutMs?: number; // default 30_000：挂起的 connect() 不得 wedge 监督
   sleep?: (ms: number) => Promise<void>; // 测试注入（记录退避时长/即时返回）
   now?: () => number;                      // 测试注入

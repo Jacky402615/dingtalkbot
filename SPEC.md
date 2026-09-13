@@ -13,8 +13,8 @@
 ## Reply（D1 契约）
 
 - 通道：OpenAPI REST + 自管 token；`sessionWebhook` 不使用（spec Q4）。
-- token：`POST /v1.0/oauth2/accessToken`；内存+`.bot/token.json`（0600 原子写，按 clientId 指纹隔离——凭据轮换旧缓存失效）双缓存；到期前 5 分钟刷新；并发 single-flight（CI-verified）。expireIn 单位歧义由归一化处理并在 smoke 实测（live-verified 待回填）。
-- 请求时限：token 与回复请求各 10s deadline（覆盖 fetch + body 读取），叠加 handler 3 次重试后总预算约 43s，落在钉钉 60s 重推窗口内（CI-verified）。
+- token：`POST /v1.0/oauth2/accessToken`；内存+`.bot/token.json`（0600 原子写，按 clientId+clientSecret 凭据指纹隔离——任一凭据轮换旧缓存即失效；缓存权限非 0600 或不可解析均告警忽略）双缓存；到期前 5 分钟刷新；并发 single-flight（CI-verified）。expireIn 单位歧义由归一化处理并在 smoke 实测（live-verified 待回填）。
+- 请求时限：token 与回复请求各 10s deadline（覆盖 fetch + body 读取）；handler 全部尝试（token+回复+重试延迟）另受 50s 总预算约束，压在钉钉 60s 重推窗口内（CI-verified）。
 - p2p 回复：`POST /v1.0/robot/oToMessages/batchSend`，`userIds=[senderStaffId]`；群回复：`POST /v1.0/robot/groupMessages/send`，`openConversationId=入站 conversationId`（live-verified 待回填）；msgKey `sampleMarkdown`，msgParam `{title,text}`（CI-verified：载荷形状）。
 - echo 行为：文本按字节原样回显（title `dingtalkbot`）；群消息不剥 @ 前缀（群策略是 D3）；非文本/空文本丢弃并留 warn 日志。
 
@@ -28,7 +28,7 @@
 
 ## `.bot/` 布局
 
-`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3）· `access.json`（{admin,approved,groups} 占位，D3 前无语义）· `token.json`（0600 token 缓存，含 clientId 指纹）· `state.json`（连接快照）· `sessions/ uploads/`（D2/D4 占位）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
+`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3）· `access.json`（{admin,approved,groups} 占位，D3 前无语义）· `token.json`（0600 token 缓存，含凭据指纹）· `state.json`（连接快照）· `sessions/ uploads/`（D2/D4 占位）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
 
 ## 已知平台假设（live 验证清单）
 

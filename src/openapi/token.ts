@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { Logger } from '../logger.js';
 import { withDeadline } from '../deadline.js';
@@ -34,7 +35,8 @@ export class TokenManager {
   private readonly cacheKey: string;
 
   constructor(private readonly opts: TokenManagerOptions) {
-    this.cacheKey = opts.clientId; // 凭据指纹：换 app 不复用旧 token
+    // 凭据指纹（clientId+clientSecret 摘要，不落明文）：任一凭据轮换旧缓存即失效
+    this.cacheKey = createHash('sha256').update(`${opts.clientId}:${opts.clientSecret}`).digest('hex').slice(0, 16);
   }
 
   get fetchCallCount(): number { return this.fetchCount; }
@@ -86,10 +88,16 @@ export class TokenManager {
           signal,
         });
         if (!resp.ok) {
-          const body = await resp.text().catch(() => '');
+          const body = await resp.text().catch((e) => `（错误体读取失败: ${String(e)}）`);
           throw new Error(`HTTP ${resp.status} ${body}`);
         }
-        return (await resp.json().catch(() => null)) as { accessToken?: string; expireIn?: number } | null;
+        let parsed: unknown;
+        try {
+          parsed = await resp.json();
+        } catch (e) {
+          throw new Error(`响应 JSON 解析失败: ${String(e)}`);
+        }
+        return parsed as { accessToken?: string; expireIn?: number } | null;
       });
     } catch (err) {
       throw new Error(`获取 access token 失败: ${String(err)}`);
@@ -114,9 +122,15 @@ export class TokenManager {
   private readDisk(): TokenCache | null {
     try {
       if (!existsSync(this.opts.cacheFile)) return null;
+      const mode = statSync(this.opts.cacheFile).mode & 0o777;
+      if ((mode & 0o077) !== 0) {
+        this.opts.logger?.warn('token', `token 缓存权限非 0600（${mode.toString(8)}），忽略，待重写时收紧`);
+        return null;
+      }
       const c = JSON.parse(readFileSync(this.opts.cacheFile, 'utf8')) as TokenCache;
       return typeof c.accessToken === 'string' && typeof c.expiresAt === 'number' && typeof c.key === 'string' ? c : null;
-    } catch {
+    } catch (err) {
+      this.opts.logger?.warn('token', `token 缓存不可解析，忽略（重新获取）: ${String(err)}`);
       return null;
     }
   }

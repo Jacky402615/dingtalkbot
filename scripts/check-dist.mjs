@@ -28,6 +28,14 @@ walk('dist');
 if (!/["']dingtalk-stream["']/.test(cliText)) {
   problems.push('dist/cli.js 未以裸说明符引用 dingtalk-stream（external 失效，SDK 被打包内联）');
 }
+// 4) 锁文件卫生：禁止 http 明文与区域镜像 tarball 源（供应链/CI 可达性）
+if (existsSync('bun.lock')) {
+  const lock = readFileSync('bun.lock', 'utf8');
+  const mirror = lock.match(/https?:\/\/[^"']*(?:mirrors\.tencent|registry\.npmmirror|registry\.npm\.taobao)[^"']*/);
+  if (mirror) problems.push(`bun.lock 含区域镜像源: ${mirror[0]}`);
+  const plainHttp = lock.match(/"http:\/\/[^"]+"/);
+  if (plainHttp) problems.push(`bun.lock 含明文 http URL: ${plainHttp[0]}`);
+}
 if (problems.length > 0) {
   for (const p of problems) console.error(`check:dist FAIL — ${p}`);
   process.exit(1);

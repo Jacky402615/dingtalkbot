@@ -1,8 +1,19 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TokenManager, normalizeExpiry, TOKEN_URL } from '../../src/openapi/token.js';
+import type { Logger } from '../../src/logger.js';
+
+function recordingLogger() {
+  const lines: Array<{ level: string; msg: string }> = [];
+  const rec: Logger = {
+    debug: () => {}, info: () => {},
+    warn: (m, msg) => { lines.push({ level: 'warn', msg }); },
+    error: (m, msg) => { lines.push({ level: 'error', msg }); },
+  };
+  return { lines, logger: rec };
+}
 
 function fakeFetch(tokens: Array<{ token: string; expireIn: number }>, log: Array<unknown>) {
   let call = 0;
@@ -74,6 +85,43 @@ test('凭据轮换：换 clientId 后不复用旧 token（磁盘 key 不匹配�
   const t2 = new TokenManager({ clientId: 'ck-B', clientSecret: 'cs', cacheFile, fetchFn: fakeFetch([{ token: 'TB', expireIn: 7_200 }], calls) });
   expect(await t2.getAccessToken()).toBe('TB'); // 不复用 A 的 token
   expect(t2.fetchCallCount).toBe(1);
+});
+
+test('凭据轮换：同 clientId 只换 clientSecret 同样不复用旧缓存', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  const calls: Array<unknown> = [];
+  const t1 = new TokenManager({ clientId: 'ck-A', clientSecret: 's1', cacheFile, fetchFn: fakeFetch([{ token: 'TA', expireIn: 7_200 }], calls) });
+  await t1.getAccessToken();
+  const t2 = new TokenManager({ clientId: 'ck-A', clientSecret: 's2', cacheFile, fetchFn: fakeFetch([{ token: 'TB', expireIn: 7_200 }], calls) });
+  expect(await t2.getAccessToken()).toBe('TB');
+  expect(t2.fetchCallCount).toBe(1);
+});
+
+test('磁盘缓存不可解析 → warn 留痕（#62）并重新获取', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  writeFileSync(cacheFile, '{corrupt', { mode: 0o600 }); // 0600 写入以越过权限检查、命中解析分支
+  const { lines, logger } = recordingLogger();
+  const tm = new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile, logger, fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], []) });
+  expect(await tm.getAccessToken()).toBe('T1');
+  expect(lines.some((l) => l.level === 'warn' && l.msg.includes('不可解析'))).toBe(true);
+});
+
+test('磁盘缓存权限非 0600 → 忽略并重写收紧', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  const calls: Array<unknown> = [];
+  const t1 = new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile, fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], calls) });
+  await t1.getAccessToken();
+  chmodSync(cacheFile, 0o644); // planted/漂移的可读缓存
+  const { lines, logger } = recordingLogger();
+  const t2 = new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile, logger, fetchFn: fakeFetch([{ token: 'T2', expireIn: 7_200 }], calls) });
+  expect(await t2.getAccessToken()).toBe('T2'); // 不复用
+  expect(t2.fetchCallCount).toBe(1);
+  expect(lines.some((l) => l.level === 'warn' && l.msg.includes('0600'))).toBe(true);
+  const { statSync } = await import('node:fs');
+  expect((statSync(cacheFile).mode & 0o777)).toBe(0o600); // 重写后收紧
 });
 
 test('invalidate：内存+磁盘双清，下次必重取（旧 token 不从磁盘复活）', async () => {

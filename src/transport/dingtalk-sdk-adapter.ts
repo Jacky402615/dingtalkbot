@@ -1,6 +1,7 @@
 import { DWClient, EventAck, TOPIC_ROBOT } from 'dingtalk-stream';
 import type { DingtalkTransport, MessageHandler, StateListener, TransportOptions, TransportState } from './types.js';
 import { normalizeRobotMessage } from './types.js';
+import { withDeadline } from '../deadline.js';
 
 export class TransportStartError extends Error {}
 export class TransportStoppedError extends Error {}
@@ -138,19 +139,20 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         await this.withTimeout(client.connect(), timeoutMs, 'connect()');
       } catch (err) {
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
-        // 序列化尝试：废弃半途连接的残留 socket/状态；废弃失败则重建 client（同代续用）
+        // 序列化尝试：废弃半途连接（原 connect() promise 可能仍存活并迟到 open）
+        try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `废弃尝试时 disconnect 失败: ${String(dErr)}`); }
+        // 每次超时后重建 client：迟到的旧 connect 绝无机会与下一次尝试重叠
         try {
-          client.disconnect();
-        } catch (dErr) {
-          this.opts.logger.error('transport', `废弃超时尝试时 disconnect 失败，重建 client: ${String(dErr)}`);
-          try {
-            client = this.initClient(factory);
-            this.client = client;
-          } catch (rErr) {
-            this.opts.logger.error('transport', `重建 client 失败，本代监督终止: ${String(rErr)}`);
+          client = this.initClient(factory);
+          this.client = client;
+        } catch (rErr) {
+          this.opts.logger.error('transport', `重建 client 失败: ${String(rErr)}`);
+          if (!firstRegisteredDone) {
             rejectFirst(new TransportStartError(`无法恢复的连接状态（重建 client 失败）: ${String(rErr)}`));
             return;
           }
+          // 运行期（AC3 不 wedge）：沿用旧 client 按退避继续重试
+          this.opts.logger.error('transport', '运行期重建失败，沿用旧 client 继续退避');
         }
       }
       if (!alive()) return; // stop/重启：本代 supervisor 就地退出
@@ -171,7 +173,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         this.opts.logger.error('transport', `启动失败（响亮失败）: ${detail}`);
         this.setState('stopped', detail);
         this.stopped = true;
-        try { client.disconnect(); } catch { /* 已断 */ }
+        try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `启动超时清理 disconnect 失败: ${String(dErr)}`); }
         rejectFirst(new TransportStartError(`dingtalk-stream 连接超时: ${detail}`));
         return;
       }
@@ -213,9 +215,14 @@ export class DingtalkSdkTransport implements DingtalkTransport {
 
   private async handleDownstream(downstream: DWClientDownStreamLike, owner: DwClientLike): Promise<void> {
     const messageId = downstream?.headers?.messageId ?? '';
+    if (this.client !== owner) {
+      // stop/换代后迟到的消息：不解析、不进 handler（防重复回显）、不 ack
+      this.opts.logger.warn('transport', `丢弃换代前的迟到消息（不处理不 ack）: messageId=${messageId || '?'}`);
+      return;
+    }
     const ack = (message: string) => {
       if (this.client !== owner) {
-        // stop/换代后迟到的消息：绝不向新连接发旧 messageId 的 ack，也不静默
+        // 处理期间发生 stop/换代：绝不向新连接发旧 messageId 的 ack，也不静默
         this.opts.logger.warn('transport', `ack 丢弃（transport 已换代）: messageId=${messageId}`);
         return;
       }
@@ -242,17 +249,27 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     this.opts.logger.info('transport', `收到消息 msgId=${msg.msgId || '?'} kind=${msg.conversationKind} msgtype=${msg.msgtype} sender=${msg.senderStaffId || '?'}`);
     const maxAttempts = this.opts.maxHandlerAttempts ?? 3;
     const retryDelay = this.opts.handlerRetryDelayMs ?? 500;
+    // 总预算：全部尝试（token+回复+重试延迟）压在钉钉 60s 重推窗口内
+    const budgetMs = this.opts.handlerBudgetMs ?? 50_000;
+    const startedAt = Date.now();
     for (let a = 1; a <= maxAttempts; a++) {
+      const left = budgetMs - (Date.now() - startedAt);
+      if (left <= 0) {
+        this.opts.logger.error('transport', `handler 总预算 ${budgetMs}ms 耗尽，停止重试（60s 重推窗口防护）`);
+        break;
+      }
       try {
-        await this.handler?.(msg);
+        await withDeadline('handler 处理', left, async () => { await this.handler?.(msg); });
         ack('OK');
         return;
       } catch (err) {
         this.opts.logger.error('transport', `handler 第 ${a}/${maxAttempts} 次失败: ${String(err)}`);
-        if (a < maxAttempts) await new Promise((r) => setTimeout(r, retryDelay * a));
+        if (a < maxAttempts && budgetMs - (Date.now() - startedAt) > 0) {
+          await new Promise((r) => setTimeout(r, retryDelay * a));
+        }
       }
     }
-    this.opts.logger.error('transport', `handler 全部 ${maxAttempts} 次失败，丢弃并 ack（避免服务端 60s 重推）`);
+    this.opts.logger.error('transport', `handler 全部尝试失败/预算耗尽，丢弃并 ack（避免服务端 60s 重推）`);
     ack('handler-failed');
   }
 }

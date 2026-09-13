@@ -24,6 +24,7 @@ export class FakeDwClient extends EventEmitter implements DwClientLike {
   failNextConnects = 0;
   failForever = false;   // 永远连不上（坏凭据场景；避免有限次数被快速耗尽）
   hangConnects = 0;      // connect() 永不 resolve（挂起场景，验证 per-attempt 超时）
+  lateResolveMs = 0;     // connect() 延迟后才成功（验证超时后重建：旧 promise 迟到 open 无害）
   disconnectThrows = false; // disconnect() 抛错（验证废弃失败后重建 client）
   registerDelayMs = 0;
   acks: Array<{ messageId: string; result: unknown }> = [];
@@ -43,6 +44,9 @@ export class FakeDwClient extends EventEmitter implements DwClientLike {
     if (this.hangConnects > 0) {
       this.hangConnects -= 1;
       await new Promise<void>(() => {}); // 永不 resolve
+    }
+    if (this.lateResolveMs > 0) {
+      await new Promise((r) => setTimeout(r, this.lateResolveMs)); // 迟到才继续（晚于 per-attempt 超时）
     }
     if (this.failForever || this.failNextConnects > 0) {
       if (!this.failForever) this.failNextConnects -= 1; // 模拟 SDK 吞掉连接失败：connect() 正常返回但没连上

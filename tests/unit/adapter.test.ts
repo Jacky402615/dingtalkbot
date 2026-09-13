@@ -90,7 +90,7 @@ test('adapter: stop 后立即 start——旧 supervisor 的迟到注册不得结
   await t.stop();
 });
 
-test('adapter: 换代后迟到的入站消息不得向新 client 发旧 ack（丢弃 + 留痕）', async () => {
+test('adapter: 换代后迟到的入站消息不进 handler 也不 ack（丢弃 + 留痕）', async () => {
   const clients: FakeDwClient[] = [];
   const t = new DingtalkSdkTransport({
     clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
@@ -98,17 +98,82 @@ test('adapter: 换代后迟到的入站消息不得向新 client 发旧 ack（�
     sleep: async () => {},
     clientFactory: () => { const c = new FakeDwClient(); clients.push(c); return c; },
   });
-  t.onMessage(async () => {}); // handler 即时完成
+  let handled = 0;
+  t.onMessage(async () => { handled += 1; }); // handler 计数：旧代消息绝不进 handler（防重复回显）
   await t.start();             // client1
   await t.stop();
   await t.start();             // client2（换代会）
   clients[0].emitRobotMessage(TEXT_PAYLOAD, 'stale-1'); // 旧 client 的迟到消息
   await new Promise((r) => setTimeout(r, 30));
+  expect(handled).toBe(0);
   expect(clients[0].acks).toHaveLength(0); // 旧 client 已断开无从 ack
   expect(clients[1].acks).toHaveLength(0); // 绝不向新 client 发旧 messageId 的 ack
   clients[1].emitRobotMessage(TEXT_PAYLOAD, 'fresh-1'); // 新代消息正常 ack
   await new Promise((r) => setTimeout(r, 30));
+  expect(handled).toBe(1);
   expect(clients[1].acks).toEqual([{ messageId: 'fresh-1', result: { status: 'SUCCESS', message: 'OK' } }]);
+  await t.stop();
+});
+
+test('adapter: 迟到才 resolve 的 connect 不与下一次尝试重叠（超时后必重建）', async () => {
+  const clients: FakeDwClient[] = [];
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 5, registeredWaitMs: 300, watchdogPollMs: 20, connectAttemptTimeoutMs: 30, startTimeoutMs: 3_000,
+    sleep: async () => { await new Promise((r) => setTimeout(r, 0)); },
+    clientFactory: () => {
+      const c = new FakeDwClient();
+      if (clients.length === 0) c.lateResolveMs = 150; // 首个 connect 晚于 attempt 超时才成功
+      clients.push(c);
+      return c;
+    },
+  });
+  await t.start(); // client1 超时被弃 → 重建的 client2 立即注册成功
+  expect(clients.length).toBe(2);
+  expect(clients[1].registered).toBe(true);
+  expect(clients[1].connectCalls).toBe(1);
+  await new Promise((r) => setTimeout(r, 200)); // client1 的迟到 connect 此刻 resolve
+  expect(clients[0].connected).toBe(true);      // 旧 client 自身状态翻转（无害）
+  expect(t.getState()).toBe('connected');       // 传输仍由 client2 支配，未受重叠干扰
+  expect(clients[1].connectCalls).toBe(1);
+  await t.stop();
+});
+
+test('adapter: 运行期重建失败不退出监督——沿用旧 client 恢复（AC3 无 wedge）', async () => {
+  const clients: FakeDwClient[] = [];
+  let factoryCalls = 0;
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 5, registeredWaitMs: 300, watchdogPollMs: 20, connectAttemptTimeoutMs: 30, startTimeoutMs: 3_000,
+    sleep: async () => { await new Promise((r) => setTimeout(r, 0)); },
+    clientFactory: () => {
+      factoryCalls += 1;
+      if (factoryCalls === 2) throw new Error('factory broken'); // 首次重建时失败
+      const c = new FakeDwClient();
+      clients.push(c);
+      return c;
+    },
+  });
+  await t.start(); // client1 注册成功
+  expect(clients).toHaveLength(1);
+  clients[0].killSocket();
+  clients[0].hangConnects = 1; // 重连尝试挂起 → 超时 → disconnect → 重建失败 → 沿用旧 client 退避
+  await new Promise((r) => setTimeout(r, 250));
+  expect(clients[0].registered).toBe(true); // 旧 client 第二次 connect 成功，监督未退出
+  expect(factoryCalls).toBe(2);             // 初次 + 失败的重建，之后不再需要
+  await t.stop();
+});
+
+test('adapter: handler 总预算耗尽 → 停止重试并 ack handler-failed（60s 重推窗口防护）', async () => {
+  const client = new FakeDwClient();
+  const t = makeTransport(client, [], { handlerRetryDelayMs: 1, handlerBudgetMs: 40 });
+  let calls = 0;
+  t.onMessage(async () => { calls += 1; await new Promise((r) => setTimeout(r, 100)); }); // 单次即超预算
+  await t.start();
+  client.emitRobotMessage(TEXT_PAYLOAD, 'm-b');
+  await new Promise((r) => setTimeout(r, 160));
+  expect(calls).toBe(1); // 预算截断，不再重试
+  expect(client.acks[0]).toMatchObject({ messageId: 'm-b', result: { status: 'SUCCESS', message: 'handler-failed' } });
   await t.stop();
 });
 
