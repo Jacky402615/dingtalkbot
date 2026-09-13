@@ -1025,7 +1025,7 @@ test('bridge: 超长截断 30000 字符 + warn', async () => {
   - `endTurn(record): void` —— 同 persist（语义别名：回合结束落盘）。
   - 文件名 `sha256(chatKey).slice(0,16)+'.json'`；损坏 JSON → warn + 当作不存在。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1112,11 +1112,11 @@ test('store: 损坏 JSON → warn + 新会话；0600；构造自建目录（评�
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/session-store.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现**（`createHash('sha256')` 文件名；read→parse try/catch→warn 视为不存在；write 走 `tmp(wx)+renameSync+chmodSync(0o600)`；构造器 mkdir recursive 0700。）
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/session-store.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现**（`createHash('sha256')` 文件名；read→parse try/catch→warn 视为不存在；write 走 `tmp(wx)+renameSync+chmodSync(0o600)`；构造器 mkdir recursive 0700。）
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/session-store.test.ts` Expected: PASS（5 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/session-store.ts tests/unit/session-store.test.ts && git commit -m "feat(agent): per-chat session store — idle-TTL resume, immediate persist, atomic writes"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/session-store.test.ts` Expected: PASS（5 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/session-store.ts tests/unit/session-store.test.ts && git commit -m "feat(agent): per-chat session store — idle-TTL resume, immediate persist, atomic writes"`
 
 ### Task 7: 问题桥——@ 剥离 / 编号渲染 / 数字应答解析（src/agent/question-bridge.ts）
 
