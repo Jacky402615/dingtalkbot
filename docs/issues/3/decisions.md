@@ -135,3 +135,11 @@ Codex 条件（采纳）：SPEC 注明未知斜杠会到达 agent（claude `-p` 
 - **SPEC G1 口径对齐**：D3 节措辞改为"access 异常 fail-closed 不上抛；其余失败上抛由 transport 有界重试"——与实现/decisions 一致，CI-verified 回填不虚假声明。
 - **abort 计数竞态收紧**：`ActiveChild.abort` 返回 boolean（settled 竞态窗口内不计）；abortChat 只累加实际发起数；runner 测试补"自然完成的 chat 返回 0"。
 - **plan round 3 评审**：verdict `needs-attention`（5 项）→ 评审预算（3 轮）已尽，5 项全部在计划内修复（本节即修订记录），未再跑第 4 轮 codex；残余把关移交执行轮 code-review 与 Human-Review 人工门（D1/D2 同收口姿势）。
+
+### 执行轮 code-review 修订（2026-09-13，r1 Building）
+
+- **r1（4 项）**：`TurnQueue.queuedDepthOf`（在飞/排队分离——/stop 终报只计排队未开始，收尾中的当前回合不误报为排队）；`reset` 删除失败响亮上抛 + /new 失败文案（不谎报重置）；README 增 access.json 指引与 D3 命令节（删"D3 前"过时措辞）；两处 D2 装配测试注入 fake replyer（HTTP 边界全 fake，去 CI 网络依赖）。
+- **r2（3 项）**：作废三级兜底（rename → 原地覆写无效载荷 → 双失败认输）；/stop 启动窗口如实提示（不误报"无在飞"）；自然完成分支补排队披露。附注：r2 首次评审误审未提交工作区（verdict 无效），提交后重审。
+- **r3（2 项）**：双 IO 失败内存兜底墓碑（load 拒 resume 已知幽灵 sessionId，persist 成功退役——幽灵会话不变量在极端 FS 降级下保持）；/stop 启动/收尾窗口合一诚实文案（"当前没有可中止的运行回合（正在启动或收尾）"+ 排队披露）——不做 starting/settling 相位拆分（需 agent-session 上报相位，收益边际）。
+- **r4（1 项，D2 潜伏缺陷）**：`beginTurn` 非 resume 分支（首条或 TTL 过期换代）自增代际——TTL 换代后仍在飞的旧回合落盘按陈旧跳过，不再把磁盘 sessionId 倒拨回过期 id（原缺陷：换代被静默回滚，过期上下文复活）。复用 D3 epoch 机制一行修复。
+- **r5 终核**：verdict **approve**（findings 空）。质量轨迹：needs-attention ×4（共 10 项修复，含 1 项 D2 潜伏缺陷）→ approve。unknown kind 前置丢弃（dispatch fail-closed）为 r1 追加项。
