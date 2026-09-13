@@ -169,7 +169,7 @@ export function resolveConfig(raw: BotConfig, logger?: Logger): ResolvedConfig {
     - `killAll()`：置 closed（新 `run()` 直接 `{ok:false, errorText:'runner 已关停'}`）+ 对全部在飞子进程组 SIGTERM、`killDelayMs` 后组 SIGKILL 升级（r2 修订：TERM 被忽略不泄漏）。
 - Consumes: `Logger`。
 
-- [ ] **Step 1: 写 fake helper** `tests/helpers/fake-child-process.ts`
+- [x] **Step 1: 写 fake helper** `tests/helpers/fake-child-process.ts`
 
 ```ts
 export interface FakeChild {
@@ -214,7 +214,7 @@ export function makeFakeChild(): FakeChild {
 
 （`killed` 由测试注入的 `killFn` 填充：`killFn: (pid, sig) => child.killed.push(`${sig}${pid < 0 ? '-' + (-pid) : ''}`)`——runner 对组发负 pid。）
 
-- [ ] **Step 2: 写失败测试** `tests/unit/claude-runner.test.ts`
+- [x] **Step 2: 写失败测试** `tests/unit/claude-runner.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -443,8 +443,8 @@ test('runner: 非 JSON 行防御跳过（不崩）', async () => {
 
 （fake helper 增补 `writeRaw(line: string)`：直接把原始字符串喂给 data 回调（绕过 JSON.stringify）——`not-json`/空行用例走它。）
 
-- [ ] **Step 3: 验证 FAIL** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: FAIL — 模块不存在。
-- [ ] **Step 4: 实现** `src/agent/claude-runner.ts`（按行为契约直写；关键骨架）
+- [x] **Step 3: 验证 FAIL** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: FAIL — 模块不存在。
+- [x] **Step 4: 实现** `src/agent/claude-runner.ts`（按行为契约直写；关键骨架）
 
 ```ts
 import { spawn } from 'node:child_process';
@@ -608,8 +608,8 @@ export class ClaudeRunner {
 ```
 
 （strict 注：`stderrTail` 在非零退出 errorText 中拼接（`claude 退出码 ${code}${stderrTail ? ` stderr: ${stderrTail}` : ''}`）；`settleOnExit` 的 `code === null && stdoutClosed` 分支覆盖信号致死场景。）
-- [ ] **Step 5: 验证 PASS** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: PASS（13 tests）。`bun run typecheck` 绿。
-- [ ] **Step 6: Commit** — `bun run typecheck && bun test && git add src/agent/claude-runner.ts tests/helpers/fake-child-process.ts tests/unit/claude-runner.test.ts && git commit -m "feat(agent): supervised headless claude runner — message-scoped text accumulation, serialized async callbacks, process-group watchdog"`
+- [x] **Step 5: 验证 PASS** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: PASS（13 tests）。`bun run typecheck` 绿。
+- [x] **Step 6: Commit** — `bun run typecheck && bun test && git add src/agent/claude-runner.ts tests/helpers/fake-child-process.ts tests/unit/claude-runner.test.ts && git commit -m "feat(agent): supervised headless claude runner — message-scoped text accumulation, serialized async callbacks, process-group watchdog"`
 
 **--- 检查点 A：最高风险面（子进程监督/流解析/回调串行化）落地 ---**
 
