@@ -908,7 +908,7 @@ export interface DispatchDeps {
 }
 ```
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/dispatch.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/dispatch.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1068,8 +1068,8 @@ test('G5: 重复 msgId 静默丢弃；失败路径 release 后同 msgId 可重�
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/dispatch.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/handlers/dispatch.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/dispatch.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/handlers/dispatch.ts`：
 
 ```ts
 import type { InboundRobotMessage, MessageHandler } from '../transport/types.js';
@@ -1129,8 +1129,8 @@ export function createDispatchHandler(deps: DispatchDeps): MessageHandler {
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/dispatch.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/handlers/dispatch.ts tests/unit/dispatch.test.ts && git commit -m "feat(d3): dispatch 层——鉴权/群白名单/命令拦截（AC1-AC4，含真实 executor e2e）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/dispatch.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/handlers/dispatch.ts tests/unit/dispatch.test.ts && git commit -m "feat(d3): dispatch 层——鉴权/群白名单/命令拦截（AC1-AC4，含真实 executor e2e）"`
 
 **Checkpoint A（Task 1–6 完成后）**：`bun install && bun run typecheck && bun test` 全绿（此阶段 agent-session 仍带内部去重——与上游占位并存无冲突，Task 7 单提交上收）。
 

@@ -160,6 +160,6 @@ test('store D3: 跨重启复活防线——磁盘 epoch 大于内存代时 load 
   expect(snap!.sessionId).toBe('old-uuid');
   expect(snap!.epoch).toBe(0);                        // 若不重盖章，此处为 5 → 后续判陈旧恒 false
   s2.reset('p2p:st1');                                // /new → 内存代 1，文件删除
-  s2.persist(snap);                                   // 在飞/排队回合持取值快照落盘（epoch 0 < 1）
+  s2.persist(snap!);                                  // 在飞/排队回合持取值快照落盘（epoch 0 < 1）
   expect(s2.load('p2p:st1')).toBeNull();              // 拦截——旧 sessionId 不复活
 });
