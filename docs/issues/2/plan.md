@@ -1219,7 +1219,7 @@ test('parseNumericReply: 多题按位映射；个数不匹配 help；任一 mult
   - `waitIdle(chatKey): Promise<void>`（r3 修订：返回该 chat 当前链尾 promise——handler 测试确定性等回合完成，替代定时器 sleep）。
   - `get closed(): boolean`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1289,8 +1289,8 @@ test('queue: close——拒绝新入队；排队未开始的 job 轮到时丢弃
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/turn-queue.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/turn-queue.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现**
 
 ```ts
 import type { Logger } from '../logger.js';
@@ -1337,8 +1337,8 @@ export class TurnQueue {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/turn-queue.test.ts` Expected: PASS（4 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/turn-queue.ts tests/unit/turn-queue.test.ts && git commit -m "feat(agent): bounded per-chat serial turn queue with close semantics"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/turn-queue.test.ts` Expected: PASS（4 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/turn-queue.ts tests/unit/turn-queue.test.ts && git commit -m "feat(agent): bounded per-chat serial turn queue with close semantics"`
 
 **--- 检查点 C：会话层组件（runner/store/question/queue）全绿 ---**
 
