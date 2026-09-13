@@ -848,7 +848,7 @@ export class StreamThrottle {
   - `clamp(text)`：>30_000 字符截断 + `…（超长截断）` + 一次性 warn。
   - `sendFallbackMarkdown`：p2p→`sendOtoMarkdown(robotCode,[senderStaffId],'dingtalkbot',text)`；group→`sendGroupMarkdown`；`fallbackSent` 恰好一次；自身失败 → error 日志（通道穷尽）。
 
-- [ ] **Step 1: 写失败测试** `tests/unit/ai-card-bridge.test.ts`
+- [x] **Step 1: 写失败测试** `tests/unit/ai-card-bridge.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -999,11 +999,11 @@ test('bridge: 超长截断 30000 字符 + warn', async () => {
 ```
 
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/ai-card-bridge.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现**（按 Produces 契约直写：状态机 `unstarted → streaming | markdownOnly | dead`；`lastFlushedContent` 初 `''`；`flushCount` 计数；`fail` 的 isError 内容 = `回复中断：${errorText}${partialText ? '\n\n' + partialText : ''}` 截断后推送。）
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/ai-card-bridge.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现**（按 Produces 契约直写：状态机 `unstarted → streaming | markdownOnly | dead`；`lastFlushedContent` 初 `''`；`flushCount` 计数；`fail` 的 isError 内容 = `回复中断：${errorText}${partialText ? '\n\n' + partialText : ''}` 截断后推送。）
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/ai-card-bridge.test.ts` Expected: PASS（8 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cards/ai-card-bridge.ts tests/unit/ai-card-bridge.test.ts && git commit -m "feat(card): turn-scoped AI-card bridge with dual-throttle flushing and exactly-once markdown fallback"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/ai-card-bridge.test.ts` Expected: PASS（8 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cards/ai-card-bridge.ts tests/unit/ai-card-bridge.test.ts && git commit -m "feat(card): turn-scoped AI-card bridge with dual-throttle flushing and exactly-once markdown fallback"`
 
 **--- 检查点 B：卡链路（client/throttle/bridge）全绿 ---**
 
