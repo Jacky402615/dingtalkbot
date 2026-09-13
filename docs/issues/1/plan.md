@@ -1859,7 +1859,7 @@ export class Gateway {
 - Consumes: 全部前置模块。
 - Produces: `parseArgs(argv): CliArgs | null`（**位于 src/cli-args.ts**；缺省 `-r` 合法 = `process.cwd()`；仅旗标缺值/未知旗标返回 null）；`runCommand(workspace, overrides?)`（依赖全部构造完成后、`gateway.start()` 前才写 pidfile；启动失败 → gateway.stop + 清 pidfile + 抛错；信号处理器收 `exit` 注入，默认 `process.exit`）；`startCommand(workspace)`（缺 .env→`MissingEnvError`；存活且 startedAt 匹配→`AlreadyRunningError`；陈旧 pidfile 清理）；`stopCommand(workspace)`（信号前先 pidStartMatches 校验，pid 复用不杀；SIGTERM→15s 宽限→SIGKILL→短等待→清 pidfile；无 pidfile→`NotRunningError`）；`statusCommand`（纯打印，stdout 断言覆盖）；`setupCommand(args)`（旗标空串→抛错不进 readline；缺省旗标→readline 只问缺失项；写 .env 后 smoke=token+Stream connect，失败抛 `SetupSmokeError`）。**命令层错误路径不 process.exit**——退出码集中在 `cli.ts main`（run 的信号收尾 exit 是守护语义，经注入可测）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/cli-args.test.ts —— 注意 import 的是纯解析模块 src/cli-args.ts（不是入口 src/cli.ts：
@@ -2009,14 +2009,14 @@ test('runCommand: 假 transport 下全链路启动（env→gateway→state/pid �
   const paths = bootstrapWorkspace(ws);
   saveBotEnv(paths.botDir, { clientId: 'ck', clientSecret: 'cs' });
   const client = new FakeDwClient();
-  let optsSeen: { clientId: string } | null = null;
+  const seenOpts: Array<{ clientId: string }> = [];
   await runCommand(ws, {
     transportFactory: (opts) => {
-      optsSeen = opts;
+      seenOpts.push(opts);
       return new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client });
     },
   });
-  expect(optsSeen?.clientId).toBe('ck');
+  expect(seenOpts[0]?.clientId).toBe('ck');
   expect(client.connectCalls).toBeGreaterThanOrEqual(1);
   expect(existsSync(paths.stateFile)).toBe(true);
   expect(JSON.parse(readFileSync(paths.stateFile, 'utf8')).transport).toBe('connected');
@@ -2029,9 +2029,9 @@ test('runCommand: 缺 .env → 抛 EnvError（不写 pidfile）', async () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/cli-args.test.ts tests/unit/commands.test.ts tests/unit/setup.test.ts tests/integration/run.test.ts` Expected: FAIL — 模块不存在。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/cli-args.test.ts tests/unit/commands.test.ts tests/unit/setup.test.ts tests/integration/run.test.ts` Expected: FAIL — 模块不存在。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // src/commands/run.ts
@@ -2255,8 +2255,9 @@ export async function setupCommand(args: SetupArgs): Promise<void> {
 export interface CliArgs { command: string; root?: string; clientId?: string; clientSecret?: string }
 
 export function parseArgs(argv: string[]): CliArgs | null {
-  const [command, ...rest] = argv;
-  if (!command) return null;
+  const [rawCommand, ...rest] = argv;
+  if (!rawCommand) return null;
+  const command = rawCommand === '-v' || rawCommand === '--version' ? '__version' : rawCommand;
   const out: CliArgs = { command };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
@@ -2331,9 +2332,9 @@ async function main(): Promise<void> {
 void main();
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/cli-args.test.ts tests/unit/commands.test.ts tests/unit/setup.test.ts tests/integration/run.test.ts` Expected: PASS（13 tests）。`bun run typecheck` 绿。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/cli-args.test.ts tests/unit/commands.test.ts tests/unit/setup.test.ts tests/integration/run.test.ts` Expected: PASS（13 tests）。`bun run typecheck` 绿。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cli.ts src/commands tests/ && git commit -m "feat(cli): setup/run/start/stop/status commands with pid-reuse-safe daemon control"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cli.ts src/commands tests/ && git commit -m "feat(cli): setup/run/start/stop/status commands with pid-reuse-safe daemon control"`
 
 ### Task 12: SPEC.md + CHANGELOG.md + README
 
