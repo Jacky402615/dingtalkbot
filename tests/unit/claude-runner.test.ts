@@ -360,3 +360,45 @@ test('runner: 看门狗 TERM 后主进程先退 → finish 仍补发进程组 SI
   expect(res.errorText).toContain('超时');
   expect(child.killed).toContain('SIGKILL-4321'); // 主进程早退也拿到组 KILL
 });
+
+// ---- D3（issue #3）：chatKey 路由 + abortChat ----
+test('runner D3: abortChat 只杀目标 chat 的在飞回合，他 chat 不受扰；settle 后索引清零（G4）', async () => {
+  const childA = makeFakeChild();
+  const childB = makeFakeChild();
+  childA.pid = 4321; childB.pid = 4322; // makeFakeChild 恒 4321——区分 pid 才能按组路由 kill
+  const children = [childA, childB];
+  const byPid = new Map([[childA.pid, childA], [childB.pid, childB]]);
+  const r = new ClaudeRunner({
+    bin: 'claude', model: 'm', permissionMode: 'p', timeoutMs: 60_000,
+    logger: silentLogger(), killDelayMs: 10,
+    spawnFn: (() => children.shift()!) as unknown as typeof spawn,
+    killFn: (pid, sig) => { byPid.get(Math.abs(pid))?.killed.push(sig); },
+  });
+  const pA = r.run({ prompt: 'a', sessionId: 'u1', resume: false, cwd: '/ws', chatKey: 'p2p:A' }, {});
+  const pB = r.run({ prompt: 'b', sessionId: 'u2', resume: false, cwd: '/ws', chatKey: 'p2p:B' }, {});
+  expect(r.activeCountOf('p2p:A')).toBe(1);
+  expect(await r.abortChat('p2p:A', '用户 /stop')).toBe(1); // 实际中止数
+  const rA = await pA; // escalation(10ms)→KILL→finish(false) 保证 settle
+  expect(rA.ok).toBe(false);
+  expect(rA.errorText).toContain('/stop');
+  expect(childA.killed).toContain('SIGTERM');
+  expect(r.activeCountOf('p2p:A')).toBe(0);   // settle 后摘索引
+  childB.write({ type: 'result', subtype: 'success' }); childB.closeStdout(); childB.exitWith(0);
+  const rB = await pB;
+  expect(rB.ok).toBe(true);                    // B 完好
+  expect(r.activeCountOf('p2p:B')).toBe(0);
+});
+
+test('runner D3: abortChat 空 chat 幂等 no-op 返回 0；自然完成的 chat 返回 0；无 chatKey 的 run 不入 byChat', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  await expect(r.abortChat('p2p:none', 'x')).resolves.toBe(0);
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws', chatKey: 'p2p:done' }, {});
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  expect((await p).ok).toBe(true);                   // 自然完成 → 索引已清
+  await expect(r.abortChat('p2p:done', '晚到的 /stop')).resolves.toBe(0); // 不误报中止
+  const p2 = r.run({ prompt: 'y', sessionId: 'u2', resume: false, cwd: '/ws' }, {}); // 无 chatKey
+  expect(r.activeCountOf('p2p:anywhere')).toBe(0);
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  expect((await p2).ok).toBe(true);
+});

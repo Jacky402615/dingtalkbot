@@ -46,8 +46,9 @@ const noExit: (code: number) => never = () => { throw new Error('不应退出');
 
 test('runCommand: 真实装配线——消息 → session handler → runner 收 [Context: 前缀 prompt', async () => {
   const ws = mkdtempSync(join(tmpdir(), 'dtb-run3-'));
-  bootstrapWorkspace(ws);
+  const paths = bootstrapWorkspace(ws);
   saveBotEnv(join(ws, '.bot'), { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths.accessFile, JSON.stringify({ admin: ['st1'], approved: [], groups: [] })); // D3：装配线测试须先放行 st1
   const seen: string[] = [];
   const fakeRunner = {
     run: async (req: TurnRequest): Promise<TurnResult> => {
@@ -56,20 +57,27 @@ test('runCommand: 真实装配线——消息 → session handler → runner 收
     },
     killAll: () => {},
   } as unknown as ClaudeRunner;
+  const md: Array<{ kind: string; text: string }> = [];
+  const fakeReplyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ kind: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ kind: 'group', text }); },
+  } as unknown as RobotReplyer; // HTTP 边界 fake（code-review F4）：模板空 → 回退 markdown 不打真 API
   const client = new FakeDwClient();
   await runCommand(ws, {
     transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
-    depsOverrides: { runner: fakeRunner },
+    depsOverrides: { runner: fakeRunner, replyer: fakeReplyer },
   }, noExit);
   client.emitRobotMessage(P2P_PAYLOAD);
   await new Promise((r) => setTimeout(r, 150));
   expect(seen[0]).toContain('[Context: sender=n, staffId=st1, chat=c1 (p2p)]');
+  expect(md.some((x) => x.text.includes('r'))).toBe(true); // markdown 回退走 fake
 });
 
 test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回合不再执行', async () => {
   const ws2 = mkdtempSync(join(tmpdir(), 'dtb-run4-'));
   const paths2 = bootstrapWorkspace(ws2);
   saveBotEnv(paths2.botDir, { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths2.accessFile, JSON.stringify({ admin: ['st1'], approved: [], groups: [] })); // D3：关停序测试须先放行 st1
   const order: string[] = [];
   let started = 0;
   const release = deferred();
@@ -87,13 +95,17 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
     close: () => { order.push('queue.close'); realQueue.close(); },
     closed: false,
   } as unknown as TurnQueue;
+  const fakeReplyer2 = {
+    sendOtoMarkdown: async () => {},
+    sendGroupMarkdown: async () => {},
+  } as unknown as RobotReplyer; // HTTP 边界 fake（code-review F4）
   const client = new FakeDwClient();
   let capturedShutdown: ((sig: string) => Promise<void>) | null = null;
   const exits: number[] = [];
   const recordingExit = (code: number): never => { exits.push(code); throw new Error('exit-sentinel'); };
   await runCommand(ws2, {
     transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
-    depsOverrides: { runner: fakeRunner, queue: wrappedQueue },
+    depsOverrides: { runner: fakeRunner, queue: wrappedQueue, replyer: fakeReplyer2 },
     signalHook: (handler) => { capturedShutdown = handler; },
   }, recordingExit);
   expect(capturedShutdown).not.toBeNull();
@@ -110,4 +122,43 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
   expect(order).toEqual(['queue.close', 'runner.killAll', 'queue.drain']);
   expect(exits).toEqual([0]);
   expect(started).toBe(1);                                     // 排队回合被 close 丢弃，未 spawn
+});
+
+// ---- D3（issue #3）：dispatch 装配线 ----
+import { writeFileSync } from 'node:fs';
+import type { RobotReplyer } from '../../src/openapi/robot.js';
+
+test('runCommand D3: dispatch 装配——/help 网关应答、陌生 p2p 拒绝、runner 零触达；白名单消息仍达 runner（AC1/AC2 装配面）', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'dtb-run5-'));
+  const paths = bootstrapWorkspace(ws);
+  saveBotEnv(paths.botDir, { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths.accessFile, JSON.stringify({ admin: [], approved: ['st1'], groups: [] }));
+  const prompts: string[] = [];
+  const fakeRunner = {
+    run: async (req: TurnRequest): Promise<TurnResult> => {
+      prompts.push(req.prompt);
+      return { ok: true, outputText: '回合输出', errorText: '', durationMs: 1 };
+    },
+    killAll: () => {},
+  } as unknown as ClaudeRunner;
+  const md: Array<{ kind: string; text: string }> = [];
+  const replyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ kind: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ kind: 'group', text }); },
+  } as unknown as RobotReplyer;
+  const client = new FakeDwClient();
+  await runCommand(ws, {
+    transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
+    depsOverrides: { runner: fakeRunner, replyer },
+  }, noExit);
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'h1', text: { content: '/help' } });            // 命令
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'h2', senderStaffId: 'stranger', text: { content: '你好' } }); // 陌生
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'h3', text: { content: '正常消息' } });          // 白名单普通消息
+  await new Promise((r) => setTimeout(r, 150));
+  expect(prompts).toHaveLength(1);                    // 只有普通消息触达 runner
+  expect(prompts[0]).toContain('[Context: sender=n, staffId=st1, chat=c1 (p2p)]');
+  expect(md).toHaveLength(3);                         // help 文案 / 拒绝 / 回合 markdown（模板空→回退）
+  expect(md[0]!.text).toContain('/new');              // 帮助文案
+  expect(md[1]!.text).toContain('未授权');            // 拒绝文本
+  expect(md[2]!.text).toContain('回合输出');          // 正常回合仍完整走 D2 链路
 });

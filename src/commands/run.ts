@@ -9,6 +9,10 @@ import { ClaudeRunner } from '../agent/claude-runner.js';
 import { SessionStore } from '../agent/session-store.js';
 import { TurnQueue } from '../agent/turn-queue.js';
 import { createAgentSessionHandler, type AgentHandlerDeps } from '../handlers/agent-session.js';
+import { createCommandExecutor } from '../handlers/commands.js';
+import { createDispatchHandler } from '../handlers/dispatch.js';
+import { createAccessLoader } from '../access.js';
+import { MsgIdDedupe } from '../dedupe.js';
 import { Gateway } from '../gateway.js';
 import { DingtalkSdkTransport } from '../transport/dingtalk-sdk-adapter.js';
 import type { DingtalkTransport, TransportOptions } from '../transport/types.js';
@@ -34,7 +38,7 @@ export async function runCommand(
     logger.warn('run', 'config 未配置 ai_card_template_id —— 回复将以纯 markdown 输出（请在钉钉卡片平台创建 AI 卡模板后填入）');
   }
   if (config.agentPermissionMode === 'bypassPermissions') {
-    logger.warn('run', 'agent 以 bypassPermissions 运行（无头全权限）；D3 访问控制落地前，请确保机器人仅暴露于受控会话');
+    logger.warn('run', 'agent 以 bypassPermissions 运行（无头全权限）；暴露面 = access.json 白名单（admin/approved/群白名单）全体成员，请确保名单与群成员受控');
   }
   const pid = process.pid;
   const startedAt = new Date().toISOString();
@@ -44,15 +48,28 @@ export async function runCommand(
   const runner = new ClaudeRunner({ bin: config.claudeBin, model: config.model, permissionMode: config.agentPermissionMode, timeoutMs: config.agentTurnTimeoutMs, logger });
   const store = new SessionStore({ sessionsDir: paths.sessionsDir, ttlMs: config.sessionIdleTtlMinutes * 60_000, logger });
   const queue = new TurnQueue({ maxPerChat: config.queueMaxPerChat, logger });
+  const accessLoader = createAccessLoader(paths.accessFile, logger); // D3：每消息读盘、fail-closed
   const handlerDeps: AgentHandlerDeps = { replyer, cardClient, runner, store, queue, config, logger, workspace, ...overrides.depsOverrides };
   const effectiveRunner = handlerDeps.runner; // 关停作用于实际跑回合的实例（可被 overrides 注入替换）
   const effectiveQueue = handlerDeps.queue;
-  const handler = createAgentSessionHandler(handlerDeps);
+  const agent = createAgentSessionHandler(handlerDeps);
+  let gatewayRef: Gateway | null = null;
+  // dispatch/commands 一律取 handlerDeps.*（含 depsOverrides 注入）——装配线可测
+  const execute = createCommandExecutor({
+    replyer: handlerDeps.replyer, store: handlerDeps.store, queue: handlerDeps.queue,
+    runner: handlerDeps.runner, loadAccess: accessLoader,
+    status: () => gatewayRef?.lastState ?? null, logger,
+  });
+  const handler = createDispatchHandler({
+    dedupe: new MsgIdDedupe(500), agent, execute,
+    loadAccess: accessLoader, replyer: handlerDeps.replyer, logger,
+  });
   const baseOpts: TransportOptions = { clientId: env.clientId, clientSecret: env.clientSecret, logger };
   const transport = overrides.transportFactory
     ? overrides.transportFactory(baseOpts)
     : new DingtalkSdkTransport(baseOpts);
   const gateway = new Gateway({ transport, logger, stateFile: paths.stateFile, pid, startedAt, handler });
+  gatewayRef = gateway;
   let shuttingDown = false;
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;

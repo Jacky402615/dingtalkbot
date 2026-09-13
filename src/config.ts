@@ -87,7 +87,7 @@ export function resolveConfig(raw: BotConfig, logger?: Logger): ResolvedConfig {
   return cfg;
 }
 
-const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 前无语义，占位
+const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 起生效：admin∪approved=p2p 白名单，groups=openConversationId 白名单；手工编辑、每消息读盘
 
 export function resolveWorkspace(explicit?: string): string {
   return explicit ?? process.cwd();

@@ -79,3 +79,22 @@ test('queue: drainActive——close 后等待在飞 job 完整收尾（含排队
   await q.drainActive();
   expect(events).toEqual(['job-start', 'job-end']); // 在飞收尾完成 + 排队被丢弃
 });
+
+// ---- D3（issue #3 code-review F1）：queuedDepthOf 只计排队未开始 ----
+test('queue D3: queuedDepthOf 区分在飞与排队——在飞收尾期间不计入排队数', async () => {
+  const q = new TurnQueue({ maxPerChat: 10, logger: logger() });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let inJob = false;
+  q.enqueue('p2p:a', async () => { inJob = true; await gate; }); // 回合 1（将挂起）
+  await new Promise((r) => setTimeout(r, 10));                    // 等回合 1 开跑
+  q.enqueue('p2p:a', async () => {});                             // 回合 2 排队
+  expect(q.depthOf('p2p:a')).toBe(2);                             // 总深度
+  expect(q.runningCountOf('p2p:a')).toBe(1);                      // 在飞（含未 spawn 窗口）
+  expect(q.queuedDepthOf('p2p:a')).toBe(1);                       // 仅排队
+  release();
+  await q.waitIdle('p2p:a');
+  expect(inJob).toBe(true);
+  expect(q.queuedDepthOf('p2p:a')).toBe(0);
+  expect(q.depthOf('p2p:a')).toBe(0);
+});
