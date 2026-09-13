@@ -36,7 +36,7 @@
 - Produces: `BotConfig`（10 个可选键的原始形状）；`ResolvedConfig`（全具体字段）；`DEFAULT_CONFIG: ResolvedConfig`；`resolveConfig(raw: BotConfig, logger?: Logger): ResolvedConfig`（非法数值/未知权限模式 → warn + 默认值）。
 - Consumes: `Logger`（已有）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/unit/config.test.ts`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/unit/config.test.ts`）
 
 ```ts
 import { resolveConfig, DEFAULT_CONFIG } from '../../src/config.js';
@@ -62,8 +62,8 @@ test('resolveConfig: 非法数值/未知权限模式 → warn + 默认', () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL — `resolveConfig` 未导出。
-- [ ] **Step 3: 实现**（`src/config.ts` 追加；`BotConfig` 从空接口替换为键形状）
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL — `resolveConfig` 未导出。
+- [x] **Step 3: 实现**（`src/config.ts` 追加；`BotConfig` 从空接口替换为键形状）
 
 ```ts
 export interface BotConfig {
@@ -137,8 +137,8 @@ export function resolveConfig(raw: BotConfig, logger?: Logger): ResolvedConfig {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/config.test.ts` Expected: PASS。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(config): D2 agent/card/session config keys with validation"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/config.test.ts` Expected: PASS。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(config): D2 agent/card/session config keys with validation"`
 
 ### Task 2: claude 子进程 runner（最高风险任务：进程监督 + stream-json 解析 + 异步回调串行化）
 
