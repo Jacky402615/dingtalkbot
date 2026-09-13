@@ -774,7 +774,7 @@ export class CardClient {
   - `shouldFlush(newBytes: number): boolean` —— 距上次 flush ≥ minIntervalMs **且** newBytes ≥ minBytes；从未 flush 时只看字节阈值（lastFlush 初始 -Infinity）。
   - `markFlushed(): void`；`get suppressedSinceFlush(): number`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -800,8 +800,8 @@ test('throttle: 字节够但时间不够 → 不刷；首次只看字节', () =>
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/stream-throttle.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现**
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/stream-throttle.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现**
 
 ```ts
 export interface StreamThrottleOptions { minIntervalMs: number; minBytes: number; now?: () => number }
@@ -828,8 +828,8 @@ export class StreamThrottle {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/stream-throttle.test.ts` Expected: PASS。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cards/stream-throttle.ts tests/unit/stream-throttle.test.ts && git commit -m "feat(card): dual-threshold stream throttle for quota protection"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/stream-throttle.test.ts` Expected: PASS。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/cards/stream-throttle.ts tests/unit/stream-throttle.test.ts && git commit -m "feat(card): dual-threshold stream throttle for quota protection"`
 
 ### Task 5: AI 卡桥（src/cards/ai-card-bridge.ts）
 
