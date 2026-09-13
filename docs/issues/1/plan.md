@@ -725,7 +725,7 @@ export function normalizeRobotMessage(payload: unknown): InboundRobotMessage | n
 - Consumes: `DingtalkTransport`/`TransportOptions`/`normalizeRobotMessage`（Task 6）。
 - Produces: `DingtalkSdkTransport implements DingtalkTransport`；`DwClientLike`（结构化窄接口：`config/connected/registered/socket{on}/registerCallbackListener/socketCallBackResponse/connect/disconnect`）；`DwClientFactory`；`TransportStartError`；`TransportStoppedError`。监督契约：构造后 `client.config.autoReconnect=false`；`start()` 首次 registered resolve；**首次**超 `startTimeoutMs` 未注册 → disconnect + `TransportStartError`（此后 `stopped=true`，可重新 start）；**运行期断线永续退避重连（不受 deadline 约束）**；每次 `connect()` 套 per-attempt 超时（首次阶段与 deadline 赛跑；运行期 `connectAttemptTimeoutMs` 默认 30s）——挂起的 connect 不 wedge 监督；socket close/error 事件立即唤醒重连（带代际守卫，旧 socket 迟到事件不误触新连接；watchdog 轮询为双保险）；`stop()` 唤醒所有等待、结算未决 start（reject `TransportStoppedError`）、断开连接；消息处理 = 解析 → handler（≤3 次重试）→ **始终 ack**。
 
-- [ ] **Step 1: 写 fake helper** `tests/helpers/fake-dw-client.ts`
+- [x] **Step 1: 写 fake helper** `tests/helpers/fake-dw-client.ts`
 
 ```ts
 import { EventEmitter } from 'node:events';
@@ -807,7 +807,7 @@ export class FakeDwClient extends EventEmitter implements DwClientLike {
 }
 ```
 
-- [ ] **Step 2: 写失败测试** `tests/unit/adapter.test.ts`
+- [x] **Step 2: 写失败测试** `tests/unit/adapter.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -822,7 +822,7 @@ function makeTransport(client: FakeDwClient, sleeps: number[] = [], opts: Record
   return new DingtalkSdkTransport({
     clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
     backoffBaseMs: 10, backoffCapMs: 40, registeredWaitMs: 300, watchdogPollMs: 20,
-    sleep: async (ms: number) => { sleeps.push(ms); },
+    sleep: async (ms: number) => { sleeps.push(ms); await new Promise((r) => setTimeout(r, 0)); }, // 记录后退让一个宏任务节拍：立即返回会饿死测试的定时器
     clientFactory: () => client,
     ...opts,
   });
@@ -958,9 +958,9 @@ test('adapter: stop 后不再重连', async () => {
 });
 ```
 
-- [ ] **Step 3: 验证 FAIL** — Run: `bun test tests/unit/adapter.test.ts` Expected: FAIL — `Cannot find module`。
+- [x] **Step 3: 验证 FAIL** — Run: `bun test tests/unit/adapter.test.ts` Expected: FAIL — `Cannot find module`。
 
-- [ ] **Step 4: 实现** `src/transport/dingtalk-sdk-adapter.ts`
+- [x] **Step 4: 实现** `src/transport/dingtalk-sdk-adapter.ts`
 
 ```ts
 import { DWClient, EventAck, TOPIC_ROBOT } from 'dingtalk-stream';
@@ -985,8 +985,10 @@ export interface DwClientLike {
 
 export type DwClientFactory = (opts: { clientId: string; clientSecret: string }) => DwClientLike;
 
+// SDK 的 socket 在 .d.ts 中声明为 private（运行时为公有字段）——结构不兼容，
+// 在此唯一收口点做显式 cast；adapter 内部一律经由 DwClientLike 访问。
 export const defaultDwClientFactory: DwClientFactory = (opts) =>
-  new DWClient({ clientId: opts.clientId, clientSecret: opts.clientSecret, keepAlive: true });
+  new DWClient({ clientId: opts.clientId, clientSecret: opts.clientSecret, keepAlive: true }) as unknown as DwClientLike;
 
 export interface AdapterOptions extends TransportOptions { clientFactory?: DwClientFactory }
 
@@ -1193,9 +1195,9 @@ export class DingtalkSdkTransport implements DingtalkTransport {
 }
 ```
 
-- [ ] **Step 5: 验证 PASS** — Run: `bun test tests/unit/adapter.test.ts` Expected: PASS（11 tests）。`bun run typecheck` 绿。
+- [x] **Step 5: 验证 PASS** — Run: `bun test tests/unit/adapter.test.ts` Expected: PASS（11 tests）。`bun run typecheck` 绿。
 
-- [ ] **Step 6: Commit** — `bun run typecheck && bun test && git add src/transport/dingtalk-sdk-adapter.ts tests/helpers/fake-dw-client.ts tests/unit/adapter.test.ts && git commit -m "feat(transport): dingtalk-stream adapter with supervised backoff reconnect and explicit ack"`
+- [x] **Step 6: Commit** — `bun run typecheck && bun test && git add src/transport/dingtalk-sdk-adapter.ts tests/helpers/fake-dw-client.ts tests/unit/adapter.test.ts && git commit -m "feat(transport): dingtalk-stream adapter with supervised backoff reconnect and explicit ack"`
 
 ### Task 8: Token manager（src/openapi/token.ts）
 
