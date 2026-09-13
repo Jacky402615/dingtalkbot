@@ -43,7 +43,8 @@ test('queue: job 抛错 → error 日志，链不断', async () => {
   const q = new TurnQueue({ maxPerChat: 5, logger: logger({ errs }) });
   const ran: string[] = [];
   q.enqueue('c1', async () => { throw new Error('boom'); });
-  await q.enqueue('c1', async () => { ran.push('after'); });
+  q.enqueue('c1', async () => { ran.push('after'); });
+  await q.waitIdle('c1'); // 确定性等链尾（enqueue 返回值不等链执行）
   expect(ran).toEqual(['after']);
   expect(errs.some((e) => e.includes('boom'))).toBe(true);
 });
@@ -54,12 +55,13 @@ test('queue: close——拒绝新入队；排队未开始的 job 轮到时丢弃
   const d1 = deferred();
   const ran: string[] = [];
   q.enqueue('c1', async () => { ran.push('t1'); await d1.p; ran.push('t1-end'); });
+  await new Promise((r) => setTimeout(r, 10)); // 等 t1 真正开跑（在飞）再排队/关闭——消除微任务时序竞态
   q.enqueue('c1', async () => { ran.push('t2'); }); // 排队中
   q.close();
   expect(q.closed).toBe(true);
   expect(q.enqueue('c1', async () => {})).toBe(false); // 拒新
   d1.release(); // t1 完成；t2 轮到但已 close → 丢弃
-  await new Promise((r) => setTimeout(r, 10));
+  await q.waitIdle('c1');
   expect(ran).toEqual(['t1', 't1-end']); // t2 未执行
   expect(warns.some((w) => w.includes('丢弃') || w.includes('关闭'))).toBe(true);
 });

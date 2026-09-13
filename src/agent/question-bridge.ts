@@ -7,7 +7,7 @@ export function stripLeadingMention(text: string): string {
 }
 
 export function isNumericReply(text: string): boolean {
-  return /^\d+(\s*,\s*\d+)*$/.test(text);
+  return /^\d+(\s*,\s*\d+)*$/.test(text.trim());
 }
 
 export function renderQuestionList(p: AskUserQuestionPayload): string {
