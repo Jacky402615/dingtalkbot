@@ -2514,7 +2514,7 @@ jobs:
 - Consumes: 全部实现 + Jacky 的钉钉企业内部应用凭据（人供）。
 - Produces: AC2/AC5 的活体验证步骤清单与证据回填位；SPEC.md `live-verified` 标注回填。
 
-- [ ] **Step 1: 写 runbook** `docs/issues/1/live-smoke.md`（中文正文，内容如下）
+- [x] **Step 1: 写 runbook** `docs/issues/1/live-smoke.md`（中文正文，内容如下）
 
 ```md
 # D1 live smoke runbook（需 Jacky 参与执行）
@@ -2540,9 +2540,9 @@ jobs:
 - [ ] 显式 ack 抑制 60s 重推（连发 3 条消息，日志无同 messageId 重复 `收到消息`）
 ```
 
-- [ ] **Step 2: 执行轮行为**：若执行环境提供真凭据（env `DINGTALK_CLIENT_ID/SECRET` 或既有 `.bot/.env`），跑 runbook 步骤 1–3 并回填；**若没有**（预期情形）：代码/CI/文档完成后本任务标 `待人工执行`，随 Human-Review 移交 runbook——AC2/AC5 活体勾选权在 human gate。
+- [x] **Step 2: 执行轮行为**：若执行环境提供真凭据（env `DINGTALK_CLIENT_ID/SECRET` 或既有 `.bot/.env`），跑 runbook 步骤 1–3 并回填；**若没有**（预期情形）：代码/CI/文档完成后本任务标 `待人工执行`，随 Human-Review 移交 runbook——AC2/AC5 活体勾选权在 human gate。
 
-- [ ] **Step 3: 终检 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add docs/issues/1/live-smoke.md && git commit -m "docs: D1 live-smoke runbook for human verification"`
+- [x] **Step 3: 终检 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add docs/issues/1/live-smoke.md && git commit -m "docs: D1 live-smoke runbook for human verification"`
 
 ## 风险与缓解（显式）
 
