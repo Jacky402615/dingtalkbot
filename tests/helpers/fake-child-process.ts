@@ -9,7 +9,7 @@ export interface FakeChild {
   writeRaw(line: string): void;
   closeStdout(): void;
   failSpawn(err: Error): void;
-  exitWith(code: number): void;
+  exitWith(code: number | null): void;
 }
 
 export function makeFakeChild(): FakeChild {
@@ -35,6 +35,6 @@ export function makeFakeChild(): FakeChild {
     writeRaw: (line) => { for (const cb of datas) cb(Buffer.from(line + '\n')); },
     closeStdout: () => { for (const cb of closes) cb(); },
     failSpawn: (err) => { for (const cb of errors) cb(err); },
-    exitWith: (code) => { for (const cb of exits) cb(code); },
+    exitWith: (code: number | null) => { for (const cb of exits) cb(code); },
   };
 }

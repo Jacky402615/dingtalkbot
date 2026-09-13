@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { InboundRobotMessage, MessageHandler } from '../transport/types.js';
 import type { RobotReplyer } from '../openapi/robot.js';
 import type { CardClient } from '../openapi/card.js';
@@ -93,6 +94,20 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
         effectivePrompt = `${contextPrefix}\n${text}`;
       }
 
+      // 盘面会话对账（code-review 修复）：排队期间会话可能已被作废（首回合失败 delete）
+      // 或换代（TTL 过期被后续消息重置）——到达时快照不得对幽灵 sessionId 发 --resume。
+      let sessionId = record.sessionId;
+      let effectiveResume = resume;
+      if (fresh === null) {
+        sessionId = randomUUID();
+        effectiveResume = false;
+        deps.logger.warn('session', `chat=${chatKey} 排队期间会话记录已作废，全新会话起`);
+      } else if (fresh.sessionId !== record.sessionId) {
+        sessionId = fresh.sessionId;
+        effectiveResume = true;
+        deps.logger.warn('session', `chat=${chatKey} 排队期间会话已换代，跟随盘面 sessionId`);
+      }
+
       const bridge = new AiCardBridge({
         cardClient: deps.cardClient, replyer: deps.replyer, logger: deps.logger, msg: m,
         templateId: deps.config.aiCardTemplateId, contentKey: deps.config.cardContentKey,
@@ -105,7 +120,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       try {
         await bridge.start();
         const result = await deps.runner.run(
-          { prompt: effectivePrompt, sessionId: record.sessionId, resume, cwd: deps.workspace },
+          { prompt: effectivePrompt, sessionId, resume: effectiveResume, cwd: deps.workspace },
           {
             onText: (t) => { lastText = t; return bridge.pushText(t); },
             onQuestion: (p) => {

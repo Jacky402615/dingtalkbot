@@ -245,3 +245,28 @@ test('handler: 队列满 → 忙线 markdown；msgId 重复丢弃', async () => 
   await handler2(msg({ msgId: 'b9' }));
   expect(busyMd.at(-1)!.text).toContain('忙');
 });
+
+// ---- code-review r1 修复回归 ----
+test('handler: 首回合失败时已排队的第二条 → 全新会话（不对幽灵 sessionId 发 --resume）', async () => {
+  let release1!: () => void;
+  const seen: TurnRequest[] = [];
+  let call = 0;
+  const runner = {
+    run: async (req: TurnRequest): Promise<import('../../src/agent/claude-runner.js').TurnResult> => {
+      call += 1;
+      seen.push(req);
+      if (call === 1) await new Promise<void>((r) => { release1 = r; }); // 回合 1 挂起
+      if (call === 1) return { ok: false, outputText: '', errorText: 'claude 失败', durationMs: 1 };
+      return { ok: true, outputText: 'ok', errorText: '', durationMs: 1 };
+    },
+    killAll: () => {},
+  } as unknown as ClaudeRunner;
+  const { handler, queue } = harness(runner);
+  await handler(msg({ msgId: 'z1' }));                        // 回合 1 在飞
+  await new Promise((r) => setTimeout(r, 10));
+  await handler(msg({ msgId: 'z2', textContent: '追问' }));   // 到达（resume=true, sessionId=s1）→ 排队
+  release1();                                                  // 回合 1 失败 → delete 记录
+  await queue.waitIdle('p2p:st1');
+  expect(seen[1].resume).toBe(false);                          // 排队对账：记录已作废 → 全新起
+  expect(seen[1].sessionId).not.toBe(seen[0].sessionId);
+});

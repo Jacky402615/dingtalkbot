@@ -224,3 +224,55 @@ test('runner: 非 JSON 行防御跳过（不崩）', async () => {
   const res = await p;
   expect(res.ok).toBe(true);
 });
+
+// ---- code-review r1 修复回归 ----
+test('runner: text→纯 tool 消息→text 不重复前文（完整事件无 text 亦重置域）', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: '先说明' }]));
+  child.write(assistantMsg('m2', [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }])); // 无 text 块
+  child.write(assistantMsg('m3', [{ type: 'text', text: '后结论' }]));
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  const res = await p;
+  expect(res.outputText).toBe('先说明后结论'); // 不出现两次"先说明"
+});
+
+test('runner: 非 JSON 行 → warn 留痕（不静默）', async () => {
+  const child = makeFakeChild();
+  const warns: string[] = [];
+  const r = makeRunner(child, { logger: silentLogger({ warn: (m) => warns.push(m) }) });
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.writeRaw('not-json');
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  await p;
+  expect(warns.some((w) => w.includes('非 JSON'))).toBe(true);
+});
+
+test('runner: exit code=null（信号终止）→ ok:false，不再误判成功', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: '部分' }]));
+  child.closeStdout(); child.exitWith(null); // 信号死
+  const res = await p;
+  expect(res.ok).toBe(false);
+  expect(res.errorText).toContain('信号');
+  expect(res.outputText).toBe('部分');
+});
+
+test('runner: killAll 中止在飞回合（TERM→KILL + 按关停定性）', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: '跑到一半' }]));
+  r.killAll();
+  const res = await p;
+  expect(res.ok).toBe(false);
+  expect(res.errorText).toContain('killAll');
+  expect(child.killed[0]).toBe('SIGTERM-4321');
+  expect(child.killed.at(-1)).toBe('SIGKILL-4321');
+  expect(r['closed']).toBe(true);
+  const after = await r.run({ prompt: 'y', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  expect(after.ok).toBe(false); // 关停后拒新
+});

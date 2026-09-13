@@ -26,7 +26,7 @@ export interface ClaudeRunnerOptions {
   killDelayMs?: number;
 }
 
-interface ActiveChild { pid: number; killGroup: (s: NodeJS.Signals) => void }
+interface ActiveChild { pid: number; killGroup: (s: NodeJS.Signals) => void; abort: (reason: string) => void }
 
 export class ClaudeRunner {
   private readonly active = new Set<ActiveChild>();
@@ -36,11 +36,7 @@ export class ClaudeRunner {
 
   killAll(): void {
     this.closed = true; // 关停后拒绝新 run
-    const delay = this.opts.killDelayMs ?? 5_000;
-    for (const a of this.active) {
-      a.killGroup('SIGTERM');
-      setTimeout(() => a.killGroup('SIGKILL'), delay); // TERM 被忽略 → KILL 升级
-    }
+    for (const a of this.active) a.abort('runner 已关停（killAll）'); // TERM→KILL 升级 + 中止在飞 run
     this.active.clear();
   }
 
@@ -58,6 +54,7 @@ export class ClaudeRunner {
       let committedText = '';
       let inflightAuthoritative: string | null = null;
       let inflightPartial: string | null = null;
+      let partialFromCompleted = false; // 完整事件后续写的 delta（代表已完成内容，换域时要提交）
       let currentMsgId: string | null = null;
       let questionSeen = false;
       // 回调串行链：异步 onText 不乱序、settle 前排空；链空闲时首回调同步触发（事件即达）
@@ -84,12 +81,16 @@ export class ClaudeRunner {
       const killFn = this.opts.killFn ?? ((pid, sig) => process.kill(pid, sig));
       let exitInfo: { code: number | null } | null = null;
       let stdoutClosed = false;
+      let forcedError: string | null = null; // 看门狗/killAll 已定性的失败——exit 事件不得改判成功
+      const escalationTimers = new Set<ReturnType<typeof setTimeout>>();
       let entryRef: ActiveChild | null = null;
       const finish = (ok: boolean, errorText: string) => {
         if (settled) return;
         settled = true;
         if (timer !== null) clearTimeout(timer);
         if (closeFallbackTimer !== null) clearTimeout(closeFallbackTimer);
+        for (const t of escalationTimers) clearTimeout(t);
+        escalationTimers.clear();
         if (entryRef !== null) this.active.delete(entryRef);
         const outputText = fullText();
         void emitChain.then(() => resolve({ ok, outputText, errorText, durationMs: (this.opts.now ?? Date.now)() - started }));
@@ -106,19 +107,35 @@ export class ClaudeRunner {
       const killGroup = (signal: NodeJS.Signals) => {
         try { killFn(-child.pid!, signal); } catch { try { killFn(child.pid!, signal); } catch { /* 已死 */ } }
       };
-      const entry: ActiveChild = { pid: child.pid ?? 0, killGroup };
+      const entry: ActiveChild = {
+        pid: child.pid ?? 0,
+        killGroup,
+        abort: (reason: string) => {
+          if (settled) return;
+          forcedError = reason;
+          killGroup('SIGTERM');
+          const escalation = setTimeout(() => { killGroup('SIGKILL'); finish(false, reason); }, this.opts.killDelayMs ?? 5_000);
+          escalationTimers.add(escalation);
+        },
+      };
       entryRef = entry;
       this.active.add(entry);
       timer = setTimeout(() => {
         this.opts.logger.error('agent', `回合超时 ${this.opts.timeoutMs}ms，进程组杀灭 pid=${child.pid}`);
+        forcedError = `回合超时（${this.opts.timeoutMs}ms）`;
         killGroup('SIGTERM');
-        // escalation 完成后才 settle——TERM→KILL 序列对测试确定性成立
-        setTimeout(() => { killGroup('SIGKILL'); finish(false, `回合超时（${this.opts.timeoutMs}ms）`); }, this.opts.killDelayMs ?? 5_000);
+        // escalation 完成后才 settle——TERM→KILL 序列对测试确定性成立；exit 提前到达也按 forcedError 定性
+        const escalation = setTimeout(() => { killGroup('SIGKILL'); finish(false, forcedError!); }, this.opts.killDelayMs ?? 5_000);
+        escalationTimers.add(escalation);
       }, this.opts.timeoutMs);
       const settleOnExit = () => {
+        if (forcedError !== null) { finish(false, forcedError); return; } // 超时/关停杀灭：不得改判成功
         const code = exitInfo?.code;
-        if (code === 0 || (code === null && stdoutClosed)) {
+        if (code === 0) {
           finish(true, '');
+        } else if (code === null) {
+          this.opts.logger.error('agent', 'claude 被信号终止（exit code=null）');
+          finish(false, 'claude 被信号终止（code=null）');
         } else {
           this.opts.logger.error('agent', `claude 非零退出 code=${code}${stderrTail !== '' ? ` stderr尾=${stderrTail}` : ''}`);
           finish(false, `claude 退出码 ${code}${stderrTail !== '' ? ` stderr: ${stderrTail}` : ''}`);
@@ -135,7 +152,10 @@ export class ClaudeRunner {
       const handleLine = (line: string) => {
         if (line.trim() === '') return;
         let ev: any;
-        try { ev = JSON.parse(line); } catch { return; } // 防御：非 JSON 行丢弃
+        try { ev = JSON.parse(line); } catch {
+          this.opts.logger.warn('agent', `CLI stdout 非 JSON 行（跳过，CLI 契约漂移征兆）: ${line.slice(0, 80)}`);
+          return;
+        }
         if (ev?.type === 'system' && ev.subtype === 'init') {
           if (ev.session_id !== req.sessionId) {
             this.opts.logger.warn('agent', `init session_id=${ev.session_id} 与请求 ${req.sessionId} 不符`);
@@ -144,19 +164,20 @@ export class ClaudeRunner {
         }
         if (ev?.type === 'assistant' && Array.isArray(ev.message?.content)) {
           const msgId = typeof ev.message.id === 'string' ? ev.message.id : null;
-          // 域切换：id 变化；防御回退——id 缺失时已有在飞内容即视为新消息
-          const isNewMessage = currentMsgId === null
-            ? (inflightAuthoritative !== null || inflightPartial !== null)
-            : msgId !== currentMsgId;
-          if (isNewMessage) committedText += inflightAuthoritative ?? '';
+          // 域切换：id 变化；防御回退——id 缺失时每个 complete 事件即新消息。
+          // 换域提交 = 上一消息权威全文 + （若为完整事件后续写）携带 partial；
+          // 完整事件【前】的 delta 属即将到来的消息，由权威全文替换，不提交。
+          if (msgId === null || currentMsgId === null || msgId !== currentMsgId) {
+            committedText += (inflightAuthoritative ?? '') + (partialFromCompleted ? inflightPartial ?? '' : '');
+          }
           currentMsgId = msgId;
           const authoritative: string[] = [];
-          let hasText = false;
           for (const block of ev.message.content as any[]) {
-            if (block?.type === 'text' && typeof block.text === 'string') { authoritative.push(block.text); hasText = true; }
+            if (block?.type === 'text' && typeof block.text === 'string') authoritative.push(block.text);
           }
-          if (hasText) inflightAuthoritative = authoritative.join(''); // 权威替换 partial
+          inflightAuthoritative = authoritative.join(''); // 权威替换 partial；无 text 块亦重置为 ''（防旧消息文本被重复提交）
           inflightPartial = null;
+          partialFromCompleted = false;
           // 同消息保序：text 块按序流出；遇到问题 tool_use 后抑制（不补发快照——前置 text 已按序 enqueue）
           for (const block of ev.message.content as any[]) {
             if (block?.type === 'text' && !questionSeen) {
@@ -174,7 +195,12 @@ export class ClaudeRunner {
         }
         if (ev?.type === 'stream_event' && ev.event?.type === 'content_block_delta'
           && ev.event.delta?.type === 'text_delta' && typeof ev.event.delta.text === 'string') {
+          if (inflightAuthoritative !== null) {
+            // 完整事件后续写：并入 partial 并标记携带（换域时随提交，不被下一权威替换丢失）
+            partialFromCompleted = true;
+          }
           inflightPartial = (inflightAuthoritative ?? inflightPartial ?? '') + ev.event.delta.text;
+          inflightAuthoritative = null;
           if (!questionSeen) {
             const snapshot = fullText();
             enqueueEmit(() => cbs.onText?.(snapshot));
