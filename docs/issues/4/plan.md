@@ -1668,10 +1668,10 @@ pruneLoop.stop();
 - Modify: `SPEC.md`（D4 节回填 `CI-verified` 标注）
 - 验证 `docs/issues/4/plan.md` checkbox 与实际状态一致
 
-- [ ] **Step 1: 安装与门禁**（G10）— Run: `bun install && bun run typecheck && bun test` Expected: typecheck 零错误、全部测试 PASS
-- [ ] **Step 2: 构建冒烟** — Run: `bun run build && bun run check:dist` Expected: PASS
-- [ ] **Step 3: SPEC 回填** — 门禁全绿后，D4 节各契约条目句尾追加 `（CI-verified）`（对照 D1–D3 节样式；live 清单与平台约束条目不标）
-- [ ] **Step 4: AC 追溯核对**（逐条对照测试名）：
+- [x] **Step 1: 安装与门禁**（G10）— Run: `bun install && bun run typecheck && bun test` Expected: typecheck 零错误、全部测试 PASS
+- [x] **Step 2: 构建冒烟** — Run: `bun run build && bun run check:dist` Expected: PASS
+- [x] **Step 3: SPEC 回填** — 门禁全绿后，D4 节各契约条目句尾追加 `（CI-verified）`（对照 D1–D3 节样式；live 清单与平台约束条目不标）
+- [x] **Step 4: AC 追溯核对**（逐条对照测试名）：
   - AC1 → `attachments.test.ts` "AC1——p2p picture 交换+下载落盘" + `agent-session.test.ts` "p2p 图片——prompt=前缀+附件注记" + `run.test.ts` "媒体装配" ✓
   - AC2 → `attachments.test.ts` "file 附件（AC2）——显示名剥扩展" ✓
   - AC3 → `attachments.test.ts` "AC3——audio/video 归档注记"（audio 真载荷 + recognition 不进 prompt 断言）+ `agent-session.test.ts` richText 用例 ✓
@@ -1680,7 +1680,7 @@ pruneLoop.stop();
   - 群 richText（文本+图）→ `run.test.ts` "白名单群 @ 发 richText"；群 picture 载荷 → `attachments.test.ts` parse/AC1 单元（群/群仅 dispatch 透传差异已在 D3 测试覆盖） ✓
   - G1/G2/G5/G7 → `attachments.test.ts` deadline/聚合耗尽/重定向逐跳/发布防碰撞/日志脱敏断言 ✓
   - G9 → 既有 agent-session 精确 prompt 断言用例全绿（文本路径零变化）✓
-- [ ] **Step 5: Commit** — `git add SPEC.md docs/issues/4 && git commit -m "docs(d4): 门禁全绿后回填 CI-verified + AC 追溯收口"`
+- [x] **Step 5: Commit** — `git add SPEC.md docs/issues/4 && git commit -m "docs(d4): 门禁全绿后回填 CI-verified + AC 追溯收口"`
 
 ---
 
