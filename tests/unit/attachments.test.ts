@@ -90,7 +90,7 @@ test('URL 安全校验: 非 https/凭据/localhost/私网字面 IP 拒绝；公�
 });
 
 // ---- Task 3：AttachmentService（下载编排）----
-import { mkdtempSync, mkdirSync, readdirSync, statSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, statSync, writeFileSync, utimesSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { AttachmentService } from '../../src/media/attachments.js';
@@ -314,4 +314,41 @@ test('service: file 附件（AC2）——显示名剥扩展防 .zip.zip；fileNa
   expect(f).toMatch(/^[0-9a-f-]{36}-报表 v2\.zip$/); // 清洗 ../ 且扩展不重复（stripExt）
   expect(out.notes[0]).toContain('file');
   expect(out.notes[0]).toContain('报表 v2.zip');
+});
+
+// ---- code-review r1 修复回归 ----
+test('service: G1——流不观测 abort 时 deadline 在写盘循环兜底（注入无限流）', async () => {
+  // 无限小 chunk 流：不因 deadline 停止产生（真实 Response 流会 reject——此 fake 模拟最坏情况）
+  const endless = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const t = setInterval(() => {
+        try { controller.enqueue(new Uint8Array([1, 2, 3])); } catch { clearInterval(t); } // 关闭后自清，不泄漏
+      }, 1);
+    },
+  });
+  const { svc, logs } = makeSvc({ deadlineMs: 20, fetchFn: (async () => new Response(endless as unknown as BodyInit, { status: 200 })) as unknown as typeof fetch });
+  const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+  expect(out).toEqual({ kind: 'error', errorText: '附件下载失败：操作超时。请重新发送该附件。' });
+  expect(logs.some((l) => l.includes('stage=deadline'))).toBe(true);
+});
+
+test('service: 非碰撞 fs 失败（EACCES 只读日期目录）→ 终态、零发布、不消耗任何发布 id', async () => {
+  const ids: string[] = ['first', 'second'];
+  const { svc, uploadsDir } = makeSvc({ uuid: () => ids.shift()! });
+  const day = join(uploadsDir, localDay());
+  mkdirSync(day, { recursive: true });
+  chmodSync(day, 0o500); // 只读目录：tmp 创建（openSync wx）即 EACCES——非 EEXIST 失败类
+  try {
+    const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+    expect(out).toEqual({ kind: 'error', errorText: '附件下载失败：文件写入失败。请重新发送该附件。' });
+    expect(ids).toEqual(['first', 'second']);            // publish 未达——零发布 id 消耗（无孤儿副本）
+    expect(readdirSync(day)).toHaveLength(0);            // 目录无残留
+  } finally { chmodSync(day, 0o700); }
+});
+
+test('sanitize: Unicode 行分隔符（U+0085/U+2028/U+2029）清洗——防 prompt 换行注入（G6）', () => {
+  expect(sanitizeFileName('abcd')).toBe('abcd');
+  expect(sanitizeFileName('bad\u2028next')).toBe('badnext');
+  expect(sanitizeFileName('bad\u0085next')).toBe('badnext');
+  expect(sanitizeFileName('bad\u2029next')).toBe('badnext');
 });

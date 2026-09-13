@@ -75,7 +75,7 @@ export function parseInboundMedia(m: InboundRobotMessage): MediaParseResult | nu
 // 文件名清洗：去分隔/控制字符/反引号/前导点；字节预算 200（255 NAME_MAX − uuid36 − 连字符 − 扩展余量），
 // code point 迭代截断不切代理对（D6——80 码元的 CJK 名会超 255 字节文件系统上限）。
 export function sanitizeFileName(name: string): string {
-  const base = name.replace(/[\\/\u0000-\u001f\u007f`]/g, '').replace(/^\.+/, '').trim();
+  const base = name.replace(/[\\/\u0000-\u001f\u007f\u0085\u2028\u2029`]/g, '').replace(/^\.+/, '').trim(); // 含 Unicode 行分隔符（防 prompt 换行注入）
   let cleaned = base === '' ? 'attachment' : base;
   if (Buffer.byteLength(cleaned, 'utf8') > 200) {
     let out = '';
@@ -288,6 +288,9 @@ export class AttachmentService implements MediaHandler {
       fd = openSync(tmp, 'wx', 0o600);
       if (resp.body !== null) {
         for await (const chunk of resp.body as unknown as AsyncIterable<Uint8Array>) {
+          if (signal.aborted) { // 流不观测 abort 时（如注入流）deadline 在此兜底（G1）
+            throw new MediaTerminalError('操作超时', 'deadline');
+          }
           budget.bytes += chunk.byteLength; // 失败尝试的已流字节计入聚合（D13）
           bytes += chunk.byteLength;
           if (bytes > this.opts.maxBytes) {
@@ -299,6 +302,12 @@ export class AttachmentService implements MediaHandler {
         }
       }
       closeSync(fd); fd = null;
+      const onDisk = statSync(tmp).size;
+      if (onDisk !== bytes) { // 写入完整性校验（截断即损坏——防"半张图骗过魔数"）
+        unlinkSync(tmp);
+        this.opts.logger.warn('media', `附件落盘尺寸不符 msgId=${m.msgId} 预期=${bytes}字节 实际=${onDisk}字节`);
+        return { result: 'corrupt', note: `[附件 ${att.kind}] 附件内容损坏，未归档；内容不可用。` };
+      }
       if (bytes === 0) {
         unlinkSync(tmp);
         this.opts.logger.warn('media', `附件空 body kind=${att.kind} msgId=${m.msgId}`);
@@ -335,7 +344,9 @@ export class AttachmentService implements MediaHandler {
       return { result: 'ok', note: `[附件 ${att.kind}] 已下载：\`${abs}\`\n- 文件名：${display}.${ext} · 大小：${bytes} 字节` };
     } catch (err) {
       if (fd !== null) { try { closeSync(fd); } catch { /* 尽力 */ } }
-      try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* 尽力 */ }
+      try { if (existsSync(tmp)) unlinkSync(tmp); } catch (cErr) {
+        this.opts.logger.warn('media', `半成品清理失败 msgId=${m.msgId}: ${String(cErr)}`); // 不静默（G7：无秘匿内容）
+      }
       if (err instanceof MediaTerminalError) throw err;
       throw new MediaTerminalError(signal.aborted ? '操作超时' : '文件写入失败', signal.aborted ? 'deadline' : 'fs');
     }
@@ -374,34 +385,43 @@ export class AttachmentService implements MediaHandler {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const dir = join(this.opts.uploadsDir, `${d.getFullYear()}-${mm}-${dd}`);
+    // 仅创建时设权（0700，umask 022 下不变）；已存在不 re-chmod——不覆盖 owner 既有权限
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    try { chmodSync(dir, 0o700); } catch { /* 已存在时不强改（幂等尽力） */ }
     return dir;
   }
 
   private cleanStaleTmp(dir: string): void {
     try {
+      let failed = 0;
       for (const f of readdirSync(dir)) {
         if (!f.endsWith('.tmp')) continue;
         const p = join(dir, f);
         try {
           if (Date.now() - statSync(p).mtimeMs > TMP_MAX_AGE_MS) unlinkSync(p);
-        } catch { /* 单文件失败忽略 */ }
+        } catch { failed += 1; }
       }
-    } catch { /* 目录读取失败忽略 */ }
+      if (failed > 0) this.opts.logger.warn('media', `陈旧 tmp 清理失败 ${failed} 项（跳过，下轮重试）`);
+    } catch { /* 目录读取失败忽略（目录可能尚不存在） */ }
   }
 
-  // link 独占发布（D6/D15）：EEXIST → 换发布 id 重试一次；仍失败 → 终态（安全 reason）。
+  // link 独占发布（D6/D15）：仅 EEXIST 换发布 id 重试一次；链接成功后的收尾失败撤回链接（不留孤儿副本）；
+  // 其余失败即终态（安全 reason）。
   private publish(tmp: string, dir: string, display: string, ext: string): string {
     for (let attempt = 0; attempt < 2; attempt++) {
       const final = join(dir, `${this.idGen()}-${display}.${ext}`);
+      let linked = false;
       try {
         linkSync(tmp, final);
+        linked = true;
         chmodSync(final, 0o600);
         unlinkSync(tmp);
         return final;
       } catch (err) {
-        if (attempt === 1) throw new MediaTerminalError('文件发布失败', 'fs');
+        if (linked) {
+          try { unlinkSync(final); } catch (rErr) { this.opts.logger.warn('media', `发布撤回失败（可能残留孤儿附件，prune 兜底）: ${String(rErr)}`); }
+        }
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' || attempt === 1) throw new MediaTerminalError('文件发布失败', 'fs');
       }
     }
     throw new Error('unreachable');

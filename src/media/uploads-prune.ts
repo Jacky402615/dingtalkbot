@@ -54,7 +54,9 @@ export function startPruneLoop(uploadsDir: string, logger?: Logger, opts: { inte
   const run = (): void => {
     if (stopped || running) return;
     running = true;
-    try { pruneUploads(uploadsDir, logger, opts.now); } catch { /* 单次失败不影响下轮 */ } finally { running = false; }
+    try { pruneUploads(uploadsDir, logger, opts.now); }
+    catch (err) { logger?.warn('media', `uploads prune 执行异常（下轮重试）: ${String(err)}`); } // 不静默
+    finally { running = false; }
   };
   const kick = setTimeout(run, 0);
   kick.unref?.();

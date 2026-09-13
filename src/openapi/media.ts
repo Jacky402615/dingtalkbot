@@ -21,12 +21,18 @@ export class MediaClient {
     const base = this.opts.apiBase ?? API_BASE;
     const path = '/v1.0/robot/messageFiles/download';
     const invoke = async (sig: AbortSignal): Promise<string> => {
-      const resp = await doFetch(base + path, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-acs-dingtalk-access-token': await this.opts.tokenManager.getAccessToken() },
-        body: JSON.stringify({ downloadCode, robotCode }),
-        signal: sig,
-      });
+      let resp: Response;
+      try {
+        resp = await doFetch(base + path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-acs-dingtalk-access-token': await this.opts.tokenManager.getAccessToken() },
+          body: JSON.stringify({ downloadCode, robotCode }),
+          signal: sig,
+        });
+      } catch {
+        // G7 fail-safe：网络异常文本可能含 URL/连接细节——就地泛化，绝不透传原始串
+        throw new Error('网络错误');
+      }
       if (!resp.ok) {
         // G7：不读错误体（可能含平台回显标识/URL）——只保留状态码，服务层映射安全文案
         throw new Error(`HTTP ${resp.status}`);
@@ -39,8 +45,8 @@ export class MediaClient {
       return signal !== undefined ? await invoke(signal)
         : await withDeadline(`OpenAPI ${path}`, this.opts.requestTimeoutMs ?? 10_000, invoke);
     } catch (err) {
-      // G7：错误日志只含阶段与路径——绝无响应体/downloadCode/URL
-      const e = new Error(`OpenAPI ${path} 失败: ${String(err)}`);
+      // 此处 err 均为自有安全文案（HTTP <n>/网络错误/响应…/超时）——可安全入日志（G7）
+      const e = new Error(`OpenAPI ${path} 失败: ${String((err as Error)?.message ?? err)}`);
       this.opts.logger?.error('media-api', e.message);
       throw e;
     }
