@@ -966,7 +966,7 @@ function safeUrlReason(err: unknown): string { return String((err as Error)?.mes
 **Interfaces:**
 - Produces: `const UPLOAD_RETENTION_DAYS = 30`；`pruneUploads(uploadsDir: string, logger?: Logger, now?: () => number): { removedFiles: number; removedDirs: number; failures: number }`；`startPruneLoop(uploadsDir: string, logger?: Logger, opts?: { intervalMs?: number; now?: () => number }): { stop(): void }`（Task 7 装配消费）
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/uploads-prune.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/uploads-prune.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1027,8 +1027,8 @@ test('prune loop: 启动异步一次 + 定时触发；stop 后不再删', async 
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/uploads-prune.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/media/uploads-prune.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/uploads-prune.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/media/uploads-prune.ts`：
 
 ```ts
 import { lstatSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
@@ -1096,8 +1096,8 @@ export function startPruneLoop(uploadsDir: string, logger?: Logger, opts: { inte
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/uploads-prune.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/media/uploads-prune.ts tests/unit/uploads-prune.test.ts && git commit -m "feat(d4): uploads 30 天 prune + 生命周期循环（AC5，single-flight/lstat 防御）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/uploads-prune.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/media/uploads-prune.ts tests/unit/uploads-prune.test.ts && git commit -m "feat(d4): uploads 30 天 prune + 生命周期循环（AC5，single-flight/lstat 防御）"`
 
 ---
 
