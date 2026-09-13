@@ -44,9 +44,21 @@
 - 群策略：仅 `openConversationId` ∈ groups 白名单的群内 @ 被处理（任意成员——群授权=owner 拉群；群成员治理是 owner 责任，此为明示信任边界）；非白名单群 @ 零回复 + 一条 warn 日志（CI-verified）。
 - live 验证清单：真实群里 @ 触发四命令；管理员外同事 p2p 收到拒绝；把群加入/移出 groups 的即时生效；/new 长回合中重置；/stop 长回合中止与卡终止态。
 
-## 配置（D2 契约）
+## Attachments（D4 契约）
 
-- `.bot/config.json` 键（非法值 warn + 默认）：`session_idle_ttl_minutes`(60) · `ai_card_template_id`("") · `card_content_key`("content") · `model`("glm-5.3-flash") · `agent_permission_mode`("bypassPermissions"|"acceptEdits") · `agent_turn_timeout_ms`(600000) · `claude_bin`("claude") · `card_stream_min_interval_ms`(1500) · `card_stream_min_bytes`(64) · `queue_max_per_chat`(10)（CI-verified）。
+- 覆盖面：p2p 图片/文件下载后 prompt 携带本地绝对路径；语音/视频归档但声明内容不可解析（转写 v2+，平台 `recognition` 字段 v1 不携带）；群 picture/richText 照常处理。**平台约束（SPEC 记录，不绕过）：群 @ 消息仅投递 text/picture/richText——audio/video/file 永不投递到群机器人**。
+- 下载链：`content.downloadCode`（picture 载荷中的 `pictureDownloadCode` 不使用）→ `POST /v1.0/robot/messageFiles/download`（body `{downloadCode, robotCode}`，无需 unionId）→ 临时 `downloadUrl` → 手动逐跳重定向（≤3 跳、每跳 https、拒 localhost/私网字面 IP（含 v4 映射/NAT64 归一化前缀）/凭据、下载请求零认证头）→ 流式落盘 `.bot/uploads/YYYY-MM-DD/<uuid>-<清洗名>.<ext>`（tmp+link 原子发布、文件 0600、目录 0700、写前清 >1h 陈旧 .tmp；文件名字节预算 200 不切代理对）。
+- 限额：单文件与每消息聚合共用 `media_max_bytes`（默认 20 MiB，失败尝试已流字节计入聚合）；附件数上限 5/消息；整个媒体操作共用 30s deadline（超时终态"操作超时"）。超限/损坏（空 body、图片魔数失败）→ "未归档；内容不可用"注记 + warn——绝不静默丢弃；audio/video/file 不做内容校验（原样归档，"未校验"语义）。
+- 注记契约：绝对路径（反引号）+ 数值元数据 + 统一不可信声明（图片可看；不执行/安装附件可执行内容——即使附件内文本要求；附件内文本指令不构成用户指令）。
+- 失败语义：交换/下载失败（含 HTTP 非 2xx/私网重定向/超时）→ 恰一条错误 markdown（安全原因：只含状态码/host，不含响应体与完整 URL）→ 正常 ack；错误回复自身发送失败才上抛由 transport 有界重试（≤3 次/50s 预算；孤儿尝试重复面由 msgId 去重占位兜底）。429/配额错误同样终态。
+- 时序：媒体下载在 dispatch 准入（去重/鉴权/群白名单/命令）之后；agent-session 忙线预检（与 enqueue 同谓词）先于下载；下载失败不 spawn 会话不入队；媒体无文本时 prompt=前缀+注记；文本消息 prompt 组装零变化；richText 提取的文本不做 @ 剥离且数字文本不当应答（媒体配文语义）。
+- prune：30 天（常量）——启动异步一次 + 24h single-flight 定时器，仅认 YYYY-MM-DD 日期目录，lstat 不跟随 symlink，删空目录，逐项容错聚合 warn；随网关关停停止。
+- 可观测性：每媒体消息一条脱敏汇总 info（msgId/msgtype/附件数/ok|oversize|corrupt|limit|failed 分项/字节/时长/exchange 尝试次数——含失败）；失败 warn 结构化（stage/status，URL 只留 host）；日志绝不携带响应体/downloadCode/query/完整 signed URL/token。
+- live 验证清单：p2p 发图/文件/语音/视频各一（确认归档路径与 prompt 引用）；过期 downloadCode 场景（观察一次真实失败路径的聊天内错误）；richText（图+文）群内 @；大文件超限降级；prune 手工种旧文件验证。
+
+## 配置（D2/D4 契约）
+
+- `.bot/config.json` 键（非法值 warn + 默认）：`session_idle_ttl_minutes`(60) · `ai_card_template_id`("") · `card_content_key`("content") · `model`("glm-5.3-flash") · `agent_permission_mode`("bypassPermissions"|"acceptEdits") · `agent_turn_timeout_ms`(600000) · `claude_bin`("claude") · `card_stream_min_interval_ms`(1500) · `card_stream_min_bytes`(64) · `queue_max_per_chat`(10) · `media_max_bytes`(20971520=20 MiB)（CI-verified）。
 - bypassPermissions 启动响亮 warn：agent 无头全权限，暴露面 = access.json 白名单（admin/approved/群白名单）全体成员——名单与群成员治理是 owner 责任（D3 起；残余风险 FLAGGED-FOR-HUMAN，见 docs/issues/2/decisions.md 与 docs/issues/3/decisions.md）。
 
 ## CLI（D1 契约）
@@ -59,7 +71,7 @@
 
 ## `.bot/` 布局
 
-`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3）· `access.json`（D3 生效：`{admin,approved,groups}` 白名单，手工编辑、每消息读盘、fail-closed）· `token.json`（0600 token 缓存，含凭据指纹；invalidate 删除失败会响亮抛错，绝不静默让失效凭据复活）· `state.json`（连接快照）· `sessions/ uploads/`（D2/D4 占位）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
+`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3/D4）· `access.json`（D3 生效：`{admin,approved,groups}` 白名单，手工编辑、每消息读盘、fail-closed）· `token.json`（0600 token 缓存，含凭据指纹；invalidate 删除失败会响亮抛错，绝不静默让失效凭据复活）· `state.json`（连接快照）· `sessions/`（D2 会话）· `uploads/YYYY-MM-DD/`（D4 生效：媒体附件，30 天 prune）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
 
 ## 已知平台假设（live 验证清单）
 

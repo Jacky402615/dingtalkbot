@@ -1630,7 +1630,7 @@ pruneLoop.stop();
 
 **Interfaces:** 无代码接口；文档契约与 D1–D3 节格式对齐。**G10：本 task 不写 `CI-verified` 标注**（Task 9 门禁全绿后回填）。
 
-- [ ] **Step 1: SPEC.md 新增节**（置于 "Commands / Access（D3 契约）" 与 "配置" 节之间）：
+- [x] **Step 1: SPEC.md 新增节**（置于 "Commands / Access（D3 契约）" 与 "配置" 节之间）：
 
 ```md
 ## Attachments（D4 契约）
@@ -1650,15 +1650,15 @@ pruneLoop.stop();
 
 **配置节（既有 "## 配置（D2 契约）"）同步更新**：键清单追加 `media_max_bytes`(20971520=20 MiB) 并把节标题括注改为（D2/D4 契约）——正数校验、非法值 warn+默认，与既有键同款语义。
 
-- [ ] **Step 2: CHANGELOG.md**（格式对齐既有条目）：
+- [x] **Step 2: CHANGELOG.md**（格式对齐既有条目）：
 
 ```md
 - D4 附件：p2p 图片/文件下载（downloadCode→临时 URL→`.bot/uploads/YYYY-MM-DD/`）且 prompt 携带本地路径；语音/视频归档但声明不可解析；richText 文本+图片混排处理；下载失败回聊天内错误；超限/损坏降级注记不静默；uploads 30 天自动 prune（破坏性变更：此前非文本消息一律丢弃，现在五类媒体消息进入 agent 会话）。
 ```
 
-- [ ] **Step 3: `docs/issues/4/live-smoke.md` runbook**（owner 真机执行；红线：记录不贴 signed URL/downloadCode/用户文件内容）：p2p 图片→验证 `uploads/YYYY-MM-DD/` 落盘 + agent 答复引用图片内容；p2p 文件（含中文名/路径穿越名）同上；p2p 语音/视频→归档 + agent 答复"无法读取内容"；群 @ 发图与图文混排；等 >5 分钟后再让 downloadCode 过期的等效验证（重发旧消息不可行，改为观察一次真实失败路径的聊天内错误）；>20MiB 文件超限降级；手工种 31 天前旧文件 → 重启网关或等定时器 → 验证删除；`.bot/logs/latest.log` 检查媒体汇总日志行与脱敏。
-- [ ] **Step 4: Verify** — Run: `test "$(grep -c 'Attachments（D4 契约）' SPEC.md)" = "1" && test "$(sed -n '/Attachments（D4 契约）/,/^## 配置/p' SPEC.md | grep -c 'CI-verified')" = "0" && test "$(grep -c 'media_max_bytes' SPEC.md)" -ge "2" && echo DOC-OK` Expected: 输出 `DOC-OK`（D4 节恰一处、节内 0 处 CI-verified、配置节含新键——计数不符即非零退出）
-- [ ] **Step 5: Commit** — `git add SPEC.md CHANGELOG.md docs/issues/4/live-smoke.md && git commit -m "docs(d4): SPEC D4 契约节（未标 CI-verified）+ CHANGELOG + live-smoke runbook"`
+- [x] **Step 3: `docs/issues/4/live-smoke.md` runbook**（owner 真机执行；红线：记录不贴 signed URL/downloadCode/用户文件内容）：p2p 图片→验证 `uploads/YYYY-MM-DD/` 落盘 + agent 答复引用图片内容；p2p 文件（含中文名/路径穿越名）同上；p2p 语音/视频→归档 + agent 答复"无法读取内容"；群 @ 发图与图文混排；等 >5 分钟后再让 downloadCode 过期的等效验证（重发旧消息不可行，改为观察一次真实失败路径的聊天内错误）；>20MiB 文件超限降级；手工种 31 天前旧文件 → 重启网关或等定时器 → 验证删除；`.bot/logs/latest.log` 检查媒体汇总日志行与脱敏。
+- [x] **Step 4: Verify** — Run: `test "$(grep -c 'Attachments（D4 契约）' SPEC.md)" = "1" && test "$(sed -n '/Attachments（D4 契约）/,/^## 配置/p' SPEC.md | grep -c 'CI-verified')" = "0" && test "$(grep -c 'media_max_bytes' SPEC.md)" -ge "2" && echo DOC-OK` Expected: 输出 `DOC-OK`（D4 节恰一处、节内 0 处 CI-verified、配置节含新键——计数不符即非零退出）
+- [x] **Step 5: Commit** — `git add SPEC.md CHANGELOG.md docs/issues/4/live-smoke.md && git commit -m "docs(d4): SPEC D4 契约节（未标 CI-verified）+ CHANGELOG + live-smoke runbook"`
 
 ---
 
