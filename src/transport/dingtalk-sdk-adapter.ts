@@ -54,10 +54,8 @@ export class DingtalkSdkTransport implements DingtalkTransport {
   async start(): Promise<void> {
     if (!this.stopped) return;
     const factory = this.opts.clientFactory ?? defaultDwClientFactory;
-    const client = factory({ clientId: this.opts.clientId, clientSecret: this.opts.clientSecret });
-    client.config.autoReconnect = false; // 监督循环自持 backoff 重连（decisions D2）
+    const client = this.initClient(factory); // autoReconnect 关闭 + 回调注册（decisions D2，单一初始化路径）
     this.client = client;
-    client.registerCallbackListener(TOPIC_ROBOT, (downstream) => { void this.handleDownstream(downstream, client); });
     this.stopped = false;
     this.generation += 1;
     const gen = this.generation;
@@ -66,8 +64,15 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     const first = new Promise<void>((resolve, reject) => { resolveFirst = resolve; rejectFirst = reject; });
     this.firstReject = (err) => rejectFirst(err); // stop() 结算的是"当前未决"的 start
     // settle 按代闭包传递：旧代 supervisor 只能结算自己那代（已结算的 Promise 再结算为 no-op）
-    void this.supervise(client, gen, resolveFirst, rejectFirst);
+    void this.supervise(client, gen, resolveFirst, rejectFirst, factory);
     return first;
+  }
+
+  private initClient(factory: DwClientFactory): DwClientLike {
+    const client = factory({ clientId: this.opts.clientId, clientSecret: this.opts.clientSecret });
+    client.config.autoReconnect = false;
+    client.registerCallbackListener(TOPIC_ROBOT, (downstream) => { void this.handleDownstream(downstream, client); });
+    return client;
   }
 
   async stop(): Promise<void> {
@@ -109,7 +114,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     });
   }
 
-  private async supervise(client: DwClientLike, gen: number, resolveFirst: () => void, rejectFirst: (err: Error) => void): Promise<void> {
+  private async supervise(client: DwClientLike, gen: number, resolveFirst: () => void, rejectFirst: (err: Error) => void, factory: DwClientFactory): Promise<void> {
     const startTimeoutMs = this.opts.startTimeoutMs ?? 30_000;
     const registeredWaitMs = this.opts.registeredWaitMs ?? 5_000;
     const baseMs = this.opts.backoffBaseMs ?? 1_000;
@@ -133,8 +138,20 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         await this.withTimeout(client.connect(), timeoutMs, 'connect()');
       } catch (err) {
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
-        // 序列化尝试：废弃半途连接的残留 socket/状态；失败必须留痕（残留连接由退避后的重连覆盖）
-        try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `废弃超时尝试时 disconnect 失败（继续退避）: ${String(dErr)}`); }
+        // 序列化尝试：废弃半途连接的残留 socket/状态；废弃失败则重建 client（同代续用）
+        try {
+          client.disconnect();
+        } catch (dErr) {
+          this.opts.logger.error('transport', `废弃超时尝试时 disconnect 失败，重建 client: ${String(dErr)}`);
+          try {
+            client = this.initClient(factory);
+            this.client = client;
+          } catch (rErr) {
+            this.opts.logger.error('transport', `重建 client 失败，本代监督终止: ${String(rErr)}`);
+            rejectFirst(new TransportStartError(`无法恢复的连接状态（重建 client 失败）: ${String(rErr)}`));
+            return;
+          }
+        }
       }
       if (!alive()) return; // stop/重启：本代 supervisor 就地退出
       this.watchSocket(client);

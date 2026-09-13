@@ -52,6 +52,26 @@ test('adapter: 挂起一次后恢复——超时的尝试被 disconnect 废弃�
   await t.stop();
 });
 
+test('adapter: 超时尝试的 disconnect 也失败 → 重建 client 后续用（不与半途连接重叠）', async () => {
+  const clients: FakeDwClient[] = [];
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 5, registeredWaitMs: 300, watchdogPollMs: 20, connectAttemptTimeoutMs: 30, startTimeoutMs: 3_000,
+    sleep: async () => { await new Promise((r) => setTimeout(r, 0)); },
+    clientFactory: () => {
+      const c = new FakeDwClient();
+      if (clients.length === 0) { c.hangConnects = 1; c.disconnectThrows = true; } // 首个 client：挂起 + 报废失败
+      clients.push(c);
+      return c;
+    },
+  });
+  await t.start(); // 重建的第二个 client 连接成功
+  expect(clients.length).toBeGreaterThanOrEqual(2);
+  expect(clients[1].registered).toBe(true);
+  expect(clients[1].config.autoReconnect).toBe(false); // 重建路径同样关掉 SDK 自动重连
+  await t.stop();
+});
+
 test('adapter: stop 后立即 start——旧 supervisor 的迟到注册不得结算新 start', async () => {
   const clients: FakeDwClient[] = [];
   const t = new DingtalkSdkTransport({

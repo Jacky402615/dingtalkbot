@@ -43,7 +43,11 @@ export class TokenManager {
     const now = this.opts.now ?? Date.now;
     const margin = this.opts.refreshMarginMs ?? REFRESH_MARGIN_MS;
     if (this.cache && this.cache.key === this.cacheKey && this.cache.expiresAt - now() > margin) return this.cache.accessToken;
-    this.inflight ??= this.resolveToken().finally(() => { this.inflight = null; });
+    if (this.inflight === null) {
+      // finally 只在仍是"当前" in-flight 时清位：invalidate 脱离后的旧请求不得清掉新请求的槽位
+      const promise = this.resolveToken().finally(() => { if (this.inflight === promise) this.inflight = null; });
+      this.inflight = promise;
+    }
     return this.inflight;
   }
 
@@ -118,15 +122,20 @@ export class TokenManager {
   }
 
   private writeDisk(cache: TokenCache): void {
-    const tmp = `${this.opts.cacheFile}.tmp`;
+    mkdirSync(dirname(this.opts.cacheFile), { recursive: true });
+    // 独占创建（wx）：planted 的同名文件不可能收到 token 内容；每次用唯一名
+    const tmp = `${this.opts.cacheFile}.${process.pid}.${Date.now()}.tmp`;
     try {
-      mkdirSync(dirname(this.opts.cacheFile), { recursive: true });
-      writeFileSync(tmp, JSON.stringify(cache), { mode: 0o600 });
-      chmodSync(tmp, 0o600); // 防 planted 0644 tmp：rename 前先收紧
+      try {
+        writeFileSync(tmp, JSON.stringify(cache), { flag: 'wx', mode: 0o600 });
+      } catch (err) {
+        throw new Error(`独占创建 tmp 失败（可能被抢占）: ${String(err)}`);
+      }
+      chmodSync(tmp, 0o600);
       renameSync(tmp, this.opts.cacheFile);
       chmodSync(this.opts.cacheFile, 0o600); // rename 到已存在路径不继承权限位——显式收紧
     } catch (err) {
-      try { if (existsSync(tmp)) rmSync(tmp); } catch { /* 尽力清理失败的可读 tmp */ }
+      try { if (existsSync(tmp)) rmSync(tmp); } catch (rmErr) { this.opts.logger?.error('token', `tmp 清理失败（可能残留可读临时文件）: ${tmp} ${String(rmErr)}`); }
       this.opts.logger?.warn('token', `token 磁盘缓存写入失败（降级仅内存）: ${String(err)}`);
     }
   }

@@ -24,6 +24,7 @@ export class FakeDwClient extends EventEmitter implements DwClientLike {
   failNextConnects = 0;
   failForever = false;   // 永远连不上（坏凭据场景；避免有限次数被快速耗尽）
   hangConnects = 0;      // connect() 永不 resolve（挂起场景，验证 per-attempt 超时）
+  disconnectThrows = false; // disconnect() 抛错（验证废弃失败后重建 client）
   registerDelayMs = 0;
   acks: Array<{ messageId: string; result: unknown }> = [];
   private seq = 0;
@@ -56,6 +57,7 @@ export class FakeDwClient extends EventEmitter implements DwClientLike {
   }
 
   disconnect(): void {
+    if (this.disconnectThrows) throw new Error('disconnect broken');
     this.connected = false;
     this.registered = false;
     this.socket?.emitClose();
