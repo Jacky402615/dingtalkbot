@@ -459,7 +459,7 @@ export const consoleLogger: Logger = {
 - Produces（state.ts）：`TransportState = 'stopped'|'starting'|'connected'|'reconnecting'`（**定义于此，transport/types.ts re-export**，避免环）；`ConnectionStateSnapshot`；`writeStateJson`（tmp+rename 原子写 0600）；`readStateJson`（缺文件/损坏 → null）。
 - Produces（pid.ts）：`PidRecord { pid, startedAt }`（startedAt = /proc 第 22 字段 ticks，抗 pid 复用）；`writePidFile/readPidFile/clearPidFile/isProcessAlive/readProcessStartedAt/pidStartMatches`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/state.test.ts
@@ -509,9 +509,9 @@ test('pidfile: 写/读/清 + 自身进程存活与起始时刻匹配', () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/state.test.ts tests/unit/pid.test.ts` Expected: FAIL — 两个模块均 `Cannot find module`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/state.test.ts tests/unit/pid.test.ts` Expected: FAIL — 两个模块均 `Cannot find module`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // src/state.ts
@@ -589,9 +589,9 @@ export function pidStartMatches(pidFile: string, pid: number): boolean {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/state.test.ts tests/unit/pid.test.ts` Expected: PASS（3 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/state.test.ts tests/unit/pid.test.ts` Expected: PASS（3 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/state.ts src/pid.ts tests/unit/state.test.ts tests/unit/pid.test.ts && git commit -m "feat(state): atomic state writer and pid-reuse-safe pidfile"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/state.ts src/pid.ts tests/unit/state.test.ts tests/unit/pid.test.ts && git commit -m "feat(state): atomic state writer and pid-reuse-safe pidfile"`
 
 **--- 检查点 A：基础设施完成（env/config/log/state/pid 全绿）---**
 
