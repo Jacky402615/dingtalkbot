@@ -70,6 +70,28 @@ test('adapter: stop 后立即 start——旧 supervisor 的迟到注册不得结
   await t.stop();
 });
 
+test('adapter: 换代后迟到的入站消息不得向新 client 发旧 ack（丢弃 + 留痕）', async () => {
+  const clients: FakeDwClient[] = [];
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 10, watchdogPollMs: 20, handlerRetryDelayMs: 1,
+    sleep: async () => {},
+    clientFactory: () => { const c = new FakeDwClient(); clients.push(c); return c; },
+  });
+  t.onMessage(async () => {}); // handler 即时完成
+  await t.start();             // client1
+  await t.stop();
+  await t.start();             // client2（换代会）
+  clients[0].emitRobotMessage(TEXT_PAYLOAD, 'stale-1'); // 旧 client 的迟到消息
+  await new Promise((r) => setTimeout(r, 30));
+  expect(clients[0].acks).toHaveLength(0); // 旧 client 已断开无从 ack
+  expect(clients[1].acks).toHaveLength(0); // 绝不向新 client 发旧 messageId 的 ack
+  clients[1].emitRobotMessage(TEXT_PAYLOAD, 'fresh-1'); // 新代消息正常 ack
+  await new Promise((r) => setTimeout(r, 30));
+  expect(clients[1].acks).toEqual([{ messageId: 'fresh-1', result: { status: 'SUCCESS', message: 'OK' } }]);
+  await t.stop();
+});
+
 test('adapter: 启动等待期间 stop() → start() 以 TransportStoppedError 结算（不悬挂）', async () => {
   const client = new FakeDwClient();
   client.failForever = true;

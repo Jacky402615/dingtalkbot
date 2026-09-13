@@ -37,7 +37,7 @@ export async function runCommand(
     shuttingDown = true;
     logger.info('run', `收到 ${signal}，关停中`);
     await gateway.stop();
-    clearPidFile(paths.pidFile);
+    if (!clearPidFile(paths.pidFile)) logger.warn('run', `pidfile 清理失败: ${paths.pidFile}`);
     logger.info('run', '已退出');
     exit(0);
   };
@@ -49,7 +49,7 @@ export async function runCommand(
     await gateway.start(); // Gateway 内部失败已 stop 清理（Task 10）
   } catch (err) {
     logger.error('run', `启动失败: ${String(err)}`);
-    clearPidFile(paths.pidFile);
+    if (!clearPidFile(paths.pidFile)) logger.warn('run', `pidfile 清理失败: ${paths.pidFile}`);
     throw err; // cli 层转非零退出（AC1）
   }
 }

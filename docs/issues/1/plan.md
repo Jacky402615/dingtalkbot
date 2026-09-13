@@ -2557,6 +2557,7 @@ jobs:
 - [x] **Step 1: 修复实现**（上述七项，含回归测试：跨代结算、超时后恢复、token 超时/invalidate 竞态、replyer 超时、相对路径 latest.log、损坏 pidfile status/stop）
 - [x] **Step 2: 验证 PASS** — Run: `bun run typecheck && bun test` Expected: 全绿（64 tests）。
 - [x] **Step 3: Commit** — `git add -A && git commit -m "fix: address code-review concurrency, timeout, and permission findings"`
+- [x] **Step 4: 第二轮评审追加修复** — ①ack 归属：`handleDownstream` 携带 owner client，换代后迟到消息丢弃 ack 并留 warn（回归测试）；②deadline 工具 `src/deadline.ts`（单一可清理定时器覆盖 fetch+body 读取，默认 10s，60s ack 窗口预算 ≈43s，含 body 挂起/invalidate 后新调用不搭旧 in-flight 的测试）；③`invalidate()` 同时脱离 in-flight；④clearPidFile 结果全调用点检查（run/start/stop 告警、消息准确）；⑤`saveBotEnv` 预收紧失败拒绝写入；⑥disconnect 废弃失败留痕。Run: `bun run typecheck && bun test` 全绿（67 tests）后 commit。
 
 ## 风险与缓解（显式）
 

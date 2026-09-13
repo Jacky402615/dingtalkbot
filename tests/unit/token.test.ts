@@ -126,3 +126,40 @@ test('invalidate 与 in-flight 刷新竞态：结果不写回缓存（防复活�
   expect(calls).toHaveLength(2);
   expect(tm.fetchCallCount).toBe(2);
 });
+
+test('invalidate 后的新调用不得搭上旧 in-flight（脱离 stale 刷新）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  let n = 0;
+  const tm = new TokenManager({
+    clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'),
+    fetchFn: (async () => {
+      n += 1;
+      const mine = n;
+      await new Promise((r) => setTimeout(r, 60)); // 慢响应
+      return new Response(JSON.stringify({ accessToken: `T${mine}`, expireIn: 7_200 }), { status: 200 });
+    }) as unknown as typeof fetch,
+  });
+  const old = tm.getAccessToken(); // T1（60ms 后返回）
+  await new Promise((r) => setTimeout(r, 10));
+  tm.invalidate();
+  const fresh = tm.getAccessToken(); // 必须发起全新请求 → T2，而不是搭旧 in-flight 等 T1
+  expect(await fresh).toBe('T2');
+  expect(await old).toBe('T1');
+  expect(tm.fetchCallCount).toBe(2);
+});
+
+test('headers 到达但 body 挂起 → deadline 同样超时（覆盖 body 读取）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const stalledBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"accessToken":"T'));
+      // 永不 enqueue 完整 JSON / close —— body 读取挂起
+    },
+  });
+  const tm = new TokenManager({
+    clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'),
+    requestTimeoutMs: 60,
+    fetchFn: (async () => new Response(stalledBody, { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
+  });
+  await expect(tm.getAccessToken()).rejects.toThrow(/超时/);
+});

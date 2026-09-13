@@ -11,8 +11,10 @@ export async function stopCommand(workspace: string): Promise<void> {
   if (rec === null) {
     if (existsSync(paths.pidFile)) {
       // 损坏 pidfile：无法安全发信号，只能响亮清理
-      if (!clearPidFile(paths.pidFile)) console.error(`pidfile 损坏且清理失败: ${paths.pidFile}`);
-      console.warn(`pidfile 损坏（不可解析），已清理，未发送信号: ${paths.pidFile}`);
+      const cleared = clearPidFile(paths.pidFile);
+      console.warn(cleared
+        ? `pidfile 损坏（不可解析），已清理，未发送信号: ${paths.pidFile}`
+        : `pidfile 损坏且清理失败，请手动删除: ${paths.pidFile}`);
       return;
     }
     throw new NotRunningError('没有 pidfile —— 未在运行');

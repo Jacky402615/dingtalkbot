@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Logger } from '../logger.js';
+import { withDeadline } from '../deadline.js';
 
 export const TOKEN_URL = 'https://api.dingtalk.com/v1.0/oauth2/accessToken';
 const REFRESH_MARGIN_MS = 5 * 60_000;
@@ -14,11 +15,11 @@ export interface TokenManagerOptions {
   fetchFn?: typeof fetch;
   now?: () => number;
   refreshMarginMs?: number;
-  requestTimeoutMs?: number; // default 15_000：挂起的 token 请求不得卡死消息处理（60s ack 窗口）
+  requestTimeoutMs?: number; // default 10_000：挂起的 token 请求不得卡死消息处理（60s ack 窗口预算）
   logger?: Logger;
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export function normalizeExpiry(expireIn: number): number {
   // 文档歧义：v1.0 端点示意为毫秒（7200000），旧语义为秒（7200）——smoke 实测后固化
@@ -49,6 +50,7 @@ export class TokenManager {
   invalidate(): void {
     this.cache = null;
     this.invalidationGen += 1; // in-flight 刷新完成后不得再把结果写回缓存/磁盘
+    this.inflight = null; // 脱离旧 in-flight：invalidate 之后的新调用必须发起新请求
     // 磁盘也必须清：否则下次 resolveToken 会把已失效 token 从磁盘"复活"
     try {
       rmSync(this.opts.cacheFile);
@@ -69,25 +71,25 @@ export class TokenManager {
     }
     const doFetch = this.opts.fetchFn ?? fetch;
     const timeoutMs = this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    let resp: Response;
+    // deadline 覆盖 fetch + body 读取（headers 到达但 body 挂起同样超时）
+    let data: { accessToken?: string; expireIn?: number } | null;
     try {
-      resp = await Promise.race([
-        doFetch(TOKEN_URL, {
+      data = await withDeadline('token 请求', timeoutMs, async (signal) => {
+        const resp = await doFetch(TOKEN_URL, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ appKey: this.opts.clientId, appSecret: this.opts.clientSecret }),
-          signal: AbortSignal.timeout(timeoutMs), // 真实 fetch 的中断；race 兜底忽略 signal 的实现
-        }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`token 请求超时 ${timeoutMs}ms`)), timeoutMs)),
-      ]);
+          signal,
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status} ${body}`);
+        }
+        return (await resp.json().catch(() => null)) as { accessToken?: string; expireIn?: number } | null;
+      });
     } catch (err) {
-      throw new Error(`获取 access token 网络失败: ${String(err)}`);
+      throw new Error(`获取 access token 失败: ${String(err)}`);
     }
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
-      throw new Error(`获取 access token 失败: HTTP ${resp.status} ${body}`);
-    }
-    const data = (await resp.json().catch(() => null)) as { accessToken?: string; expireIn?: number } | null;
     if (!data || !data.accessToken || typeof data.expireIn !== 'number') {
       throw new Error(`获取 access token 失败: 响应缺字段 ${JSON.stringify(data)}`);
     }
@@ -116,14 +118,15 @@ export class TokenManager {
   }
 
   private writeDisk(cache: TokenCache): void {
+    const tmp = `${this.opts.cacheFile}.tmp`;
     try {
       mkdirSync(dirname(this.opts.cacheFile), { recursive: true });
-      const tmp = `${this.opts.cacheFile}.tmp`;
       writeFileSync(tmp, JSON.stringify(cache), { mode: 0o600 });
       chmodSync(tmp, 0o600); // 防 planted 0644 tmp：rename 前先收紧
       renameSync(tmp, this.opts.cacheFile);
       chmodSync(this.opts.cacheFile, 0o600); // rename 到已存在路径不继承权限位——显式收紧
     } catch (err) {
+      try { if (existsSync(tmp)) rmSync(tmp); } catch { /* 尽力清理失败的可读 tmp */ }
       this.opts.logger?.warn('token', `token 磁盘缓存写入失败（降级仅内存）: ${String(err)}`);
     }
   }

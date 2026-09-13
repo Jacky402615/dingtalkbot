@@ -57,7 +57,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     const client = factory({ clientId: this.opts.clientId, clientSecret: this.opts.clientSecret });
     client.config.autoReconnect = false; // 监督循环自持 backoff 重连（decisions D2）
     this.client = client;
-    client.registerCallbackListener(TOPIC_ROBOT, (downstream) => { void this.handleDownstream(downstream); });
+    client.registerCallbackListener(TOPIC_ROBOT, (downstream) => { void this.handleDownstream(downstream, client); });
     this.stopped = false;
     this.generation += 1;
     const gen = this.generation;
@@ -133,7 +133,8 @@ export class DingtalkSdkTransport implements DingtalkTransport {
         await this.withTimeout(client.connect(), timeoutMs, 'connect()');
       } catch (err) {
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
-        try { client.disconnect(); } catch { /* 序列化尝试：废弃半途连接的残留 socket/状态 */ }
+        // 序列化尝试：废弃半途连接的残留 socket/状态；失败必须留痕（残留连接由退避后的重连覆盖）
+        try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `废弃超时尝试时 disconnect 失败（继续退避）: ${String(dErr)}`); }
       }
       if (!alive()) return; // stop/重启：本代 supervisor 就地退出
       this.watchSocket(client);
@@ -193,11 +194,16 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     }
   }
 
-  private async handleDownstream(downstream: DWClientDownStreamLike): Promise<void> {
+  private async handleDownstream(downstream: DWClientDownStreamLike, owner: DwClientLike): Promise<void> {
     const messageId = downstream?.headers?.messageId ?? '';
     const ack = (message: string) => {
+      if (this.client !== owner) {
+        // stop/换代后迟到的消息：绝不向新连接发旧 messageId 的 ack，也不静默
+        this.opts.logger.warn('transport', `ack 丢弃（transport 已换代）: messageId=${messageId}`);
+        return;
+      }
       try {
-        this.client?.socketCallBackResponse(messageId, { status: EventAck.SUCCESS, message });
+        owner.socketCallBackResponse(messageId, { status: EventAck.SUCCESS, message });
       } catch (err) {
         this.opts.logger.error('transport', `ack 发送失败: ${String(err)}`);
       }

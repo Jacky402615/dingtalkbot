@@ -1,5 +1,6 @@
 import type { Logger } from '../logger.js';
 import type { TokenManager } from './token.js';
+import { withDeadline } from '../deadline.js';
 
 export const API_BASE = 'https://api.dingtalk.com';
 
@@ -8,10 +9,10 @@ export interface RobotReplyerOptions {
   logger?: Logger;
   fetchFn?: typeof fetch;
   apiBase?: string;
-  requestTimeoutMs?: number; // default 15_000：挂起的回复请求不得卡死消息处理（60s ack 窗口）
+  requestTimeoutMs?: number; // default 10_000：挂起的回复请求不得卡死消息处理（60s ack 窗口预算）
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export class RobotReplyer {
   constructor(private readonly opts: RobotReplyerOptions) {}
@@ -21,25 +22,22 @@ export class RobotReplyer {
     const base = this.opts.apiBase ?? API_BASE;
     const timeoutMs = this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     const token = await this.opts.tokenManager.getAccessToken();
-    let resp: Response;
     try {
-      resp = await Promise.race([
-        doFetch(base + path, {
+      // deadline 覆盖 fetch + body 读取
+      await withDeadline(`OpenAPI ${path}`, timeoutMs, async (signal) => {
+        const resp = await doFetch(base + path, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-acs-dingtalk-access-token': token },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(timeoutMs), // 真实 fetch 的中断；race 兜底忽略 signal 的实现
-        }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`OpenAPI ${path} 请求超时 ${timeoutMs}ms`)), timeoutMs)),
-      ]);
+          signal,
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          throw new Error(`HTTP ${resp.status} ${text}`);
+        }
+      });
     } catch (err) {
-      const e = new Error(`OpenAPI ${path} 网络失败: ${String(err)}`);
-      this.opts.logger?.error('reply', e.message);
-      throw e;
-    }
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      const e = new Error(`OpenAPI ${path} 失败: HTTP ${resp.status} ${text}`);
+      const e = new Error(`OpenAPI ${path} 失败: ${String(err)}`);
       this.opts.logger?.error('reply', e.message);
       throw e;
     }

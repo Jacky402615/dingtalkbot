@@ -14,6 +14,7 @@
 
 - 通道：OpenAPI REST + 自管 token；`sessionWebhook` 不使用（spec Q4）。
 - token：`POST /v1.0/oauth2/accessToken`；内存+`.bot/token.json`（0600 原子写，按 clientId 指纹隔离——凭据轮换旧缓存失效）双缓存；到期前 5 分钟刷新；并发 single-flight（CI-verified）。expireIn 单位歧义由归一化处理并在 smoke 实测（live-verified 待回填）。
+- 请求时限：token 与回复请求各 10s deadline（覆盖 fetch + body 读取），叠加 handler 3 次重试后总预算约 43s，落在钉钉 60s 重推窗口内（CI-verified）。
 - p2p 回复：`POST /v1.0/robot/oToMessages/batchSend`，`userIds=[senderStaffId]`；群回复：`POST /v1.0/robot/groupMessages/send`，`openConversationId=入站 conversationId`（live-verified 待回填）；msgKey `sampleMarkdown`，msgParam `{title,text}`（CI-verified：载荷形状）。
 - echo 行为：文本按字节原样回显（title `dingtalkbot`）；群消息不剥 @ 前缀（群策略是 D3）；非文本/空文本丢弃并留 warn 日志。
 

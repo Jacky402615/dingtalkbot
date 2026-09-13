@@ -22,7 +22,7 @@ export function startCommand(workspace: string): void {
   if (existing && isProcessAlive(existing.pid) && pidStartMatches(paths.pidFile, existing.pid)) {
     throw new AlreadyRunningError(`已在运行 (pid ${existing.pid})`);
   }
-  if (existing) clearPidFile(paths.pidFile); // 死 pid / pid 复用：清理陈旧记录
+  if (existing && !clearPidFile(paths.pidFile)) console.warn(`陈旧 pidfile 清理失败: ${paths.pidFile}`);
   const binPath = resolveBotBin();
   const child = spawn(process.execPath, [binPath, 'run', '-r', workspace], { detached: true, stdio: 'ignore', env: process.env });
   child.unref();
