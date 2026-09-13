@@ -32,7 +32,7 @@ export class RobotReplyer {
           signal,
         });
         if (!resp.ok) {
-          const text = await resp.text().catch(() => '');
+          const text = await resp.text().catch((e) => `（错误体读取失败: ${String(e)}）`);
           throw new Error(`HTTP ${resp.status} ${text}`);
         }
       });

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export class EnvError extends Error {}
@@ -30,6 +30,15 @@ export function parseEnvFile(text: string): Record<string, string> {
 export function loadBotEnv(botDir: string): DingtalkEnv {
   const envFile = join(botDir, '.env');
   if (!existsSync(envFile)) throw new EnvError(`缺少 ${envFile} —— 先运行 dingtalkbot setup`);
+  // 权限漂移（如 0644）→ 读取前先收紧；收紧失败则响亮拒绝（不带着泄露继续跑）
+  const mode = statSync(envFile).mode & 0o777;
+  if ((mode & 0o077) !== 0) {
+    try {
+      chmodSync(envFile, 0o600);
+    } catch (err) {
+      throw new EnvError(`${envFile} 权限为 ${mode.toString(8)}（非 0600）且收紧失败，拒绝读取: ${String(err)}`);
+    }
+  }
   const parsed = parseEnvFile(readFileSync(envFile, 'utf8'));
   const clientId = parsed[ENV_KEYS.clientId];
   const clientSecret = parsed[ENV_KEYS.clientSecret];

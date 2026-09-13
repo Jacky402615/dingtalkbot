@@ -57,11 +57,12 @@ export class TokenManager {
     this.cache = null;
     this.invalidationGen += 1; // in-flight 刷新完成后不得再把结果写回缓存/磁盘
     this.inflight = null; // 脱离旧 in-flight：invalidate 之后的新调用必须发起新请求
-    // 磁盘也必须清：否则下次 resolveToken 会把已失效 token 从磁盘"复活"
+    // 磁盘必须清掉：否则下次 resolveToken 会把已失效 token 从磁盘"复活"。
+    // 文件不存在 = 无可清（成功）；存在但删除失败必须响亮抛出（静默降级会让失效凭据复活）。
     try {
-      rmSync(this.opts.cacheFile);
+      if (existsSync(this.opts.cacheFile)) rmSync(this.opts.cacheFile);
     } catch (err) {
-      this.opts.logger?.warn('token', `invalidate 清理磁盘缓存失败: ${String(err)}`);
+      throw new Error(`invalidate 无法删除磁盘缓存（失效 token 可能被复活，请手动清理）: ${this.opts.cacheFile}: ${String(err)}`);
     }
   }
 

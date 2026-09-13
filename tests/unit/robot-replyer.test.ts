@@ -42,13 +42,23 @@ test('sendGroupMarkdown: 端点/载荷形状', async () => {
   expect(calls[0].body).toEqual({ robotCode: 'RC2', openConversationId: 'cid-9', msgKey: 'sampleMarkdown', msgParam: JSON.stringify({ title: 't', text: 'x' }) });
 });
 
-test('非 2xx：抛带响应体的错误（不吞）', async () => {
+test('非 2xx：抛带响应体的错误（不吞）；错误体读取失败保留因', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dtb-rep-'));
   const replyer = new RobotReplyer({
     tokenManager: new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'), fetchFn: tokenFetch() }),
     fetchFn: (async () => new Response('{"code":"forbidden"}', { status: 403 })) as unknown as typeof fetch,
   });
   await expect(replyer.sendOtoMarkdown('RC', ['u'], 't', 'x')).rejects.toThrow('403');
+  const brokenBody = {
+    ok: false,
+    status: 500,
+    text: () => Promise.reject(new Error('body stream broken')),
+  } as unknown as Response;
+  const replyer2 = new RobotReplyer({
+    tokenManager: new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile: join(dir, 'token.json'), fetchFn: tokenFetch() }),
+    fetchFn: (async () => brokenBody) as unknown as typeof fetch,
+  });
+  await expect(replyer2.sendOtoMarkdown('RC', ['u'], 't', 'x')).rejects.toThrow('错误体读取失败');
 });
 
 test('挂起的回复请求按 requestTimeoutMs 响亮超时（60s ack 窗口内兜底）', async () => {

@@ -142,6 +142,19 @@ test('指纹无歧义：含冒号的凭据对不碰撞（各自独立取 token�
   expect(t2.fetchCallCount).toBe(1);
 });
 
+test('invalidate 删除失败（只读目录）→ 响亮抛错（不让失效 token 复活）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  const tm = new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile, fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], []) });
+  await tm.getAccessToken();
+  chmodSync(dir, 0o500); // 只读父目录：rm 失败但读取仍可
+  try {
+    expect(() => tm.invalidate()).toThrow(/无法删除磁盘缓存/);
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+});
+
 test('磁盘缓存权限非 0600 → 忽略并重写收紧', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
   const cacheFile = join(dir, 'token.json');

@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseEnvFile, loadBotEnv, saveBotEnv, EnvError } from '../../src/env.js';
@@ -33,4 +33,12 @@ test('saveBotEnv + loadBotEnv 往返，权限 0600（含覆写 planted 0644 文�
   saveBotEnv(dir, { clientId: 'cid2', clientSecret: 'sec2' });
   expect(statSync(join(dir, '.env')).mode & 0o777).toBe(0o600);
   expect(loadBotEnv(dir)).toEqual({ clientId: 'cid2', clientSecret: 'sec2' });
+});
+
+test('loadBotEnv: 权限漂移到 0644 → 读取前收紧为 0600 并正常加载', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-env-'));
+  saveBotEnv(dir, { clientId: 'cid', clientSecret: 'sec' });
+  chmodSync(join(dir, '.env'), 0o644); // 模拟漂移
+  expect(loadBotEnv(dir)).toEqual({ clientId: 'cid', clientSecret: 'sec' });
+  expect(statSync(join(dir, '.env')).mode & 0o777).toBe(0o600);
 });

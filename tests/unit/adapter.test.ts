@@ -182,7 +182,7 @@ test('adapter: 首次注册等待钳制在 30s deadline 内（不被 registeredW
   await t.stop();
 });
 
-test('adapter: 运行期重建失败不退出监督——沿用旧 client 恢复（AC3 无 wedge）', async () => {
+test('adapter: 运行期重建失败不退出监督——重建环退避后经新 client 恢复（AC3 无 wedge，旧 client 绝不复用）', async () => {
   const clients: FakeDwClient[] = [];
   let factoryCalls = 0;
   const t = new DingtalkSdkTransport({
@@ -200,10 +200,12 @@ test('adapter: 运行期重建失败不退出监督——沿用旧 client 恢复
   await t.start(); // client1 注册成功
   expect(clients).toHaveLength(1);
   clients[0].killSocket();
-  clients[0].hangConnects = 1; // 重连尝试挂起 → 超时 → disconnect → 重建失败 → 沿用旧 client 退避
-  await new Promise((r) => setTimeout(r, 250));
-  expect(clients[0].registered).toBe(true); // 旧 client 第二次 connect 成功，监督未退出
-  expect(factoryCalls).toBe(2);             // 初次 + 失败的重建，之后不再需要
+  clients[0].hangConnects = 1; // 重连尝试挂起 → 超时 → 重建（第 1 次失败 → 退避 → 第 2 次成功）
+  await new Promise((r) => setTimeout(r, 300));
+  expect(clients.length).toBe(2);          // 恢复经由新 client（旧 client 带废弃尝试不再复用）
+  expect(clients[1].registered).toBe(true); // 监督未退出，最终恢复
+  expect(clients[0].registered).toBe(false);
+  expect(factoryCalls).toBe(3);             // 初次 + 失败重建 + 重建重试
   await t.stop();
 });
 

@@ -5,7 +5,7 @@
 
 ## Transport（D1 契约）
 
-- 接收：官方 `dingtalk-stream@2.1.5`（exact pin）Stream 模式；订阅 `/v1.0/im/bot/messages/get`（TOPIC_ROBOT）；凭据 `.bot/.env` 的 `DINGTALK_CLIENT_ID/SECRET`。
+- 接收：官方 `dingtalk-stream@2.1.5`（exact pin）Stream 模式；订阅 `/v1.0/im/bot/messages/get`（TOPIC_ROBOT）；凭据 `.bot/.env` 的 `DINGTALK_CLIENT_ID/SECRET`（加载时权限漂移 → 读取前收紧 0600，收紧失败响亮拒绝）。
 - SDK 隔离：SDK 仅在 `src/transport/dingtalk-sdk-adapter.ts` 出现；port 定义于 `src/transport/types.ts`。替换 SDK 只改 adapter（CI-verified）。
 - 连接监督：SDK autoReconnect 关闭，自有监督循环——**首次**连接 30s 内未 `connected+registered` 则启动失败（disconnect + 非零退出 + error 日志）；运行中断线按指数退避（1s 起 ×2 封顶 60s，成功重置）**永续**重连；socket close 事件立即触发重连，watchdog 轮询为双保险（CI-verified：fake-DWClient 契约测试）。
 - 消息处理：回调 data 防御 JSON.parse；归一为 `InboundRobotMessage`（仅 text 提取原始 content，不 trim；其余 msgtype 透传 handler 决策）；处理完**显式 ack**——`socketCallBackResponse(messageId, {status:'SUCCESS', message})`（SDK 内部再包为 `{response:…}` 下发；回调返回值 SDK 不消费）；handler 失败本地重试 3 次后尽弃仍 ack（防服务端 60s 重推）；解析失败/尽弃/丢弃全部留 error/warn 日志（CI-verified）。
@@ -28,7 +28,7 @@
 
 ## `.bot/` 布局
 
-`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3）· `access.json`（{admin,approved,groups} 占位，D3 前无语义）· `token.json`（0600 token 缓存，含凭据指纹）· `state.json`（连接快照）· `sessions/ uploads/`（D2/D4 占位）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
+`.env`（0600）· `config.json`（D1 空默认，键留 D2/D3）· `access.json`（{admin,approved,groups} 占位，D3 前无语义）· `token.json`（0600 token 缓存，含凭据指纹；invalidate 删除失败会响亮抛错，绝不静默让失效凭据复活）· `state.json`（连接快照）· `sessions/ uploads/`（D2/D4 占位）· `logs/`（JSONL 每 run 一文件 `YYYYMMDD_HHMMSS.log` + latest.log 链接）· `pids/dingtalkbot.pid`。
 
 ## 已知平台假设（live 验证清单）
 

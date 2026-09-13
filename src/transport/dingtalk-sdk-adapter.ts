@@ -38,6 +38,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
   private dropSignal: (() => void) | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0; // supervisor 代际：stop()/restart() 使旧代循环就地退出，不复活
+  private stopSignals: Array<{ gen: number; fire: () => void }> = []; // 唤醒挂在 connect deadline 上的各代 supervisor
 
   constructor(private readonly opts: AdapterOptions) {}
 
@@ -81,6 +82,7 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     this.generation += 1; // 旧代 supervisor（可能挂在 withTimeout/退避上）随后自行退出
     if (this.timer !== null) clearTimeout(this.timer);
     this.dropSignal?.(); // 唤醒 watchdog 等待
+    for (const s of this.stopSignals.splice(0)) s.fire(); // 唤醒挂在 connect deadline 上的各代 supervisor（不等 30s 定时器）
     try { this.client?.disconnect(); } catch (err) { this.opts.logger.error('transport', `disconnect 出错（继续）: ${String(err)}`); }
     const err = new TransportStoppedError('transport 已被 stop()');
     this.firstReject?.(err); // 结算未决的 start()，防悬挂
@@ -128,19 +130,28 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     const deadline = now() + startTimeoutMs; // 仅约束首次注册（AC3：运行期永续）
     let firstRegisteredDone = false;
     let attempt = 0;
+    // stop() 竞速信号：挂在 connect deadline 上的等待不必陪跑至 30s 定时器到期
+    let fireStop!: () => void;
+    const stoppedRace = new Promise<never>((_, reject) => {
+      fireStop = () => reject(new TransportStoppedError('transport 已被 stop()'));
+    });
+    this.stopSignals.push({ gen, fire: fireStop });
+    try {
     this.setState('starting', `首次连接 deadline=${startTimeoutMs}ms`);
     while (alive()) {
       let attemptPromise: Promise<void> = Promise.resolve();
       let needRebuild = false;
       try {
         // SDK 的 connect() 永不 reject 且内部 axios 无超时——必须外部设限。
-        // 首次阶段与 start deadline 赛跑；运行期（已注册过）用固定 per-attempt 上限。
+        // 首次阶段与 start deadline 赛跑；运行期（已注册过）用固定 per-attempt 上限；
+        // stop() 的竞速信号随时胜出（不残留 30s 定时器等待）。
         const timeoutMs = firstRegisteredDone
           ? attemptTimeoutMs
           : Math.min(attemptTimeoutMs, Math.max(1, deadline - now()));
         attemptPromise = client.connect();
-        await this.withTimeout(attemptPromise, timeoutMs, 'connect()');
+        await Promise.race([this.withTimeout(attemptPromise, timeoutMs, 'connect()'), stoppedRace]);
       } catch (err) {
+        if (!alive()) return; // stop 竞速胜出：无清理副作用直接退出
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
         // 废弃尝试迟早会 settle：迟到 open 的 socket 事后必须再清一次（防泄漏活连接）
         const abandoned = client;
@@ -150,22 +161,26 @@ export class DingtalkSdkTransport implements DingtalkTransport {
             try { abandoned.disconnect(); } catch (dErr) { this.opts.logger.warn('transport', `废弃连接迟到清理失败: ${String(dErr)}`); }
           });
         try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `废弃尝试时 disconnect 失败: ${String(dErr)}`); }
-        needRebuild = true; // 重建移到 alive() 检查之后：旧代 supervisor 不得改写换代后的 this.client
+        needRebuild = true; // 该 client 带着未 settle 的废弃尝试，绝不再复用
       }
       if (!alive()) return; // stop/重启：本代 supervisor 就地退出（且未做任何重建副作用）
-      if (needRebuild) {
-        // 每次超时后重建 client：迟到的旧 connect 绝无机会与下一次尝试重叠
+      // 重建（含运行期失败重试）：带废弃尝试的 client 不可再用，factory 反复失败也只在重建环里退避，
+      // 绝不退回到旧 client 上再 connect（迟到 settle 会拆掉后续成功的连接）
+      while (needRebuild && alive()) {
         try {
           client = this.initClient(factory);
           this.client = client;
+          needRebuild = false;
         } catch (rErr) {
-          this.opts.logger.error('transport', `重建 client 失败: ${String(rErr)}`);
+          this.opts.logger.error('transport', `重建 client 失败（退避后重试重建）: ${String(rErr)}`);
           if (!firstRegisteredDone) {
             rejectFirst(new TransportStartError(`无法恢复的连接状态（重建 client 失败）: ${String(rErr)}`));
             return;
           }
-          // 运行期（AC3 不 wedge）：沿用旧 client 按退避继续重试
-          this.opts.logger.error('transport', '运行期重建失败，沿用旧 client 继续退避');
+          attempt += 1;
+          const rDelay = Math.min(capMs, baseMs * 2 ** (attempt - 1));
+          this.setState('reconnecting', `重建失败 attempt=${attempt}，${rDelay}ms 后重试重建`);
+          await sleep(rDelay);
         }
       }
       this.watchSocket(client);
@@ -197,6 +212,9 @@ export class DingtalkSdkTransport implements DingtalkTransport {
       const delay = Math.min(capMs, baseMs * 2 ** (attempt - 1));
       this.setState('reconnecting', `attempt=${attempt}，${delay}ms 后重连`);
       await sleep(delay);
+    }
+    } finally {
+      this.stopSignals = this.stopSignals.filter((s) => s.gen !== gen); // 本代退出即注销竞速信号
     }
   }
 
