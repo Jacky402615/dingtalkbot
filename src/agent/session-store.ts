@@ -31,16 +31,13 @@ export class SessionStore {
   private epochOf(chatKey: string): number { return this.epochs.get(chatKey) ?? 0; }
 
   reset(chatKey: string): void {
-    const file = this.fileOf(chatKey);
-    try {
-      if (existsSync(file)) renameSync(file, `${file}.dead-${Date.now()}`);
-    } catch (err) {
-      // 删除失败不得谎报重置成功：旧文件残留会使 load 复活旧 sessionId（D3 code-review F2）
-      this.opts.logger?.error('session', `chat=${chatKey} 会话文件删除失败（/new 重置失败）: ${String(err)}`);
-      throw err; // 响亮上抛——/new 回复失败文案，不进 agent
+    const outcome = this.tryInvalidate(chatKey);
+    if (outcome === 'failed') {
+      // 删除失败不得谎报重置成功：旧文件残留会使 load 复活旧 sessionId（D3 code-review）
+      throw new Error(`会话文件无法删除/覆写（chatKey=${chatKey}）`);
     }
     this.epochs.set(chatKey, this.epochOf(chatKey) + 1);
-    this.opts.logger?.info('session', `chat=${chatKey} 会话已重置（epoch=${this.epochOf(chatKey)}）`);
+    this.opts.logger?.info('session', `chat=${chatKey} 会话已重置（epoch=${this.epochOf(chatKey)}，${outcome}）`);
   }
 
   load(chatKey: string): SessionRecord | null {
@@ -59,13 +56,27 @@ export class SessionStore {
     }
   }
 
-  delete(chatKey: string): void {
+  // 作废（留痕删除）：rename 失败 → 原地覆写为无效载荷（load 按"结构异常"弃用）——
+  // 幽灵会话绝不因 IO 失败复活；覆写也失败（目录+文件均不可写）才认输。
+  private tryInvalidate(chatKey: string): 'renamed' | 'overwritten' | 'failed' {
     const file = this.fileOf(chatKey);
     try {
       if (existsSync(file)) renameSync(file, `${file}.dead-${Date.now()}`); // 留痕删除（审计），不复活
+      return 'renamed';
     } catch (err) {
-      this.opts.logger?.warn('session', `会话记录作废失败（忽略，下次覆盖）: ${String(err)}`);
+      try {
+        writeFileSync(file, '{"invalidated":true}'); // 文件可写即可：load 解析失败按不存在处理
+        this.opts.logger?.warn('session', `chat=${chatKey} 会话作废 rename 失败，已原地覆写为无效载荷: ${String(err)}`);
+        return 'overwritten';
+      } catch (wErr) {
+        this.opts.logger?.error('session', `chat=${chatKey} 会话作废失败（rename+覆写均失败，旧记录可能被 resume）: ${String(wErr)}`);
+        return 'failed';
+      }
     }
+  }
+
+  delete(chatKey: string): void {
+    this.tryInvalidate(chatKey);
   }
 
   beginTurn(chatKey: string): { record: SessionRecord; resume: boolean } {

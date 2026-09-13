@@ -16,6 +16,9 @@ export class TurnQueue {
 
   depthOf(chatKey: string): number { return this.chats.get(chatKey)?.depth ?? 0; }
 
+  // 在飞 job 数（含 bridge.start 等尚未 spawn runner 的窗口——/stop 判"有无在飞"用，D3）
+  runningCountOf(chatKey: string): number { return this.chats.get(chatKey)?.running ?? 0; }
+
   // 仅"排队未开始"的深度（在飞回合的收尾不计入）——/stop 终报的排队披露用（D3）
   queuedDepthOf(chatKey: string): number {
     const q = this.chats.get(chatKey);

@@ -37,7 +37,7 @@ export async function sendChatMarkdown(replyer: RobotReplyer, m: InboundRobotMes
 export interface CommandDeps {
   replyer: RobotReplyer;
   store: SessionStore;
-  queue: { queuedDepthOf(chatKey: string): number }; // 仅排队未开始（D3 code-review：在飞收尾不计入）
+  queue: { queuedDepthOf(chatKey: string): number; runningCountOf(chatKey: string): number };
   runner: { activeCountOf(chatKey: string): number; abortChat(chatKey: string, reason: string): Promise<number> };
   loadAccess: () => AccessList;
   status: () => ConnectionStateSnapshot | null;
@@ -104,6 +104,12 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
     // /stop
     if (deps.runner.activeCountOf(chatKey) === 0) {
       const depth0 = deps.queue.queuedDepthOf(chatKey);
+      if (deps.queue.runningCountOf(chatKey) > 0) {
+        // job 在飞但 runner 尚未注册（bridge.start → spawn 窗口）——如实告知，不误报"无在飞"
+        deps.logger.info('cmd', `chat=${chatKey} /stop 落在回合启动窗口（job 在飞、runner 未注册）`);
+        await sendChatMarkdown(deps.replyer, m, '回合正在启动中，暂无法中止；请稍后再次发送 /stop。');
+        return;
+      }
       await sendChatMarkdown(deps.replyer, m, depth0 > 0
         ? `当前无在飞回合（队列中仍有 ${depth0} 条排队消息）。`
         : '当前无在飞回合。');
@@ -127,9 +133,11 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
       return;
     }
     if (aborted === 0) {
-      // "正在中止"发送窗口内回合自然完成——如实回复（不误报中止）
+      // "正在中止"发送窗口内回合自然完成——如实回复（不误报中止），排队状态照披露
       deps.logger.info('cmd', `chat=${chatKey} /stop 时回合已自然结束（无需中止）`);
-      await sendChatMarkdown(deps.replyer, m, '回合已自然结束，无需中止。');
+      await sendChatMarkdown(deps.replyer, m, depth > 0
+        ? `回合已自然结束，无需中止。队列中仍有 ${depth} 条排队消息，将依次执行。`
+        : '回合已自然结束，无需中止。');
       return;
     }
     deps.logger.info('cmd', `chat=${chatKey} /stop 中止完成（aborted=${aborted} 排队 ${depth}）`);

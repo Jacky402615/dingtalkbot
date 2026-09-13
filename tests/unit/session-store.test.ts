@@ -164,17 +164,34 @@ test('store D3: 跨重启复活防线——磁盘 epoch 大于内存代时 load 
   expect(s2.load('p2p:st1')).toBeNull();              // 拦截——旧 sessionId 不复活
 });
 
-test('store D3: reset 删除失败响亮上抛，不谎报重置（code-review F2）', () => {
+test('store D3: 作废三级兜底——rename 失败原地覆写；双失败才认输（code-review r2）', () => {
+  // 场景 A：目录只读但文件可写 → rename 失败、覆写成功 → reset 成功且旧会话不可 resume
   const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3e-'));
-  const errs: string[] = [];
-  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000,
-    logger: { debug() {}, info() {}, warn() {}, error: (_s, m) => errs.push(m) } });
-  store.beginTurn('p2p:st1');                          // 会话文件就位
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000 });
+  store.beginTurn('p2p:st1');
   chmodSync(dir, 0o555);                               // 目录去写位 → rename 失败
   try {
-    expect(() => store.reset('p2p:st1')).toThrow();
-    expect(errs.some((e) => e.includes('删除失败'))).toBe(true);
+    store.reset('p2p:st1');                            // 覆写路径——不抛
+    expect(store.load('p2p:st1')).toBeNull();          // 无效载荷按不存在处理
+    store.delete('p2p:st1');                           // delete 同样不抛
   } finally {
-    chmodSync(dir, 0o755);                             // 恢复，供清理
+    chmodSync(dir, 0o755);
+  }
+  // 场景 B：目录与文件均只读 → rename+覆写双失败 → reset 响亮上抛、delete 只留 error
+  const dir2 = mkdtempSync(join(tmpdir(), 'dtb-sess-d3f-'));
+  const errs: string[] = [];
+  const store2 = new SessionStore({ sessionsDir: dir2, ttlMs: 3_600_000,
+    logger: { debug() {}, info() {}, warn() {}, error: (_s, m) => errs.push(m) } });
+  store2.beginTurn('p2p:st2');
+  const file2 = readdirSync(dir2).find((f) => f.endsWith('.json'))!;
+  chmodSync(dir2, 0o555);
+  chmodSync(join(dir2, file2), 0o444);
+  try {
+    expect(() => store2.reset('p2p:st2')).toThrow();
+    expect(() => store2.delete('p2p:st2')).not.toThrow(); // delete 不抛（error 日志留痕）
+    expect(errs.some((e) => e.includes('作废失败'))).toBe(true);
+  } finally {
+    chmodSync(join(dir2, file2), 0o600);
+    chmodSync(dir2, 0o755);
   }
 });

@@ -25,7 +25,7 @@ function makeDeps(over: Record<string, unknown> = {}) {
   const runnerCalls: string[] = [];
   const runner = { activeCountOf: (_c: string) => 0, abortChat: async (c: string, r: string) => { runnerCalls.push(`${c}:${r}`); return 1; } };
   const deps = {
-    replyer, store, queue: { queuedDepthOf: () => 0 }, runner,
+    replyer, store, queue: { queuedDepthOf: () => 0, runningCountOf: () => 0 }, runner,
     loadAccess: () => ({ admin: ['st0'], approved: ['st1'], groups: ['cidG'] }) as AccessList,
     status: () => ({ pid: 1, startedAt: new Date('2026-09-13T10:00:00Z').toISOString(), transport: 'connected', detail: '已连接并订阅', updatedAt: new Date().toISOString() }) as ConnectionStateSnapshot,
     logger: quiet,
@@ -74,7 +74,7 @@ test('/stop: 无在飞回提示；有在飞先回"正在中止"再 abort，终�
   const calls: string[] = [];
   const { deps, md } = makeDeps({
     runner: { activeCountOf: () => 1, abortChat: async (c: string, r: string) => { calls.push(`${c}:${r}`); return 1; } },
-    queue: { queuedDepthOf: () => 2 },
+    queue: { queuedDepthOf: () => 2, runningCountOf: () => 1 },
   });
   const exec = createCommandExecutor(deps as never);
   await exec('stop', msg({ senderStaffId: 'stX' })); // fake 的 activeCountOf 恒 1 → 走中止路径
@@ -90,13 +90,28 @@ test('/stop: 无在飞回提示；有在飞先回"正在中止"再 abort，终�
   expect(idle.md[0]!.text).toContain('无在飞');
 });
 
-test('/stop: 回合在窗口内自然结束（abortChat 返回 0）——如实回复"已自然结束"（G4）', async () => {
-  const { deps, md } = makeDeps({ runner: { activeCountOf: () => 1, abortChat: async () => 0 } });
+test('/stop: 回合在窗口内自然结束（abortChat 返回 0）——如实回复"已自然结束"+排队披露（G4，r2）', async () => {
+  const { deps, md } = makeDeps({ runner: { activeCountOf: () => 1, abortChat: async () => 0 }, queue: { queuedDepthOf: () => 1, runningCountOf: () => 1 } });
   const exec = createCommandExecutor(deps as never);
   await exec('stop', msg());
   expect(md).toHaveLength(2);
   expect(md[1]!.text).toContain('已自然结束');
+  expect(md[1]!.text).toContain('1 条排队消息');        // 自然完成也披露排队（code-review r2）
   expect(md[1]!.text).not.toContain('已中止当前回合'); // 不误报中止
+});
+
+test('/stop: 回合启动窗口（job 在飞、runner 未注册）——如实提示稍后再试，不误报"无在飞"（G4，r2）', async () => {
+  const aborts: string[] = [];
+  const { deps, md } = makeDeps({
+    runner: { activeCountOf: () => 0, abortChat: async (c: string, r: string) => { aborts.push(`${c}:${r}`); return 0; } },
+    queue: { queuedDepthOf: () => 0, runningCountOf: () => 1 }, // job running、runner 0
+  });
+  const exec = createCommandExecutor(deps as never);
+  await exec('stop', msg());
+  expect(md).toHaveLength(1);
+  expect(md[0]!.text).toContain('正在启动');
+  expect(md[0]!.text).not.toContain('无在飞回合');
+  expect(aborts).toHaveLength(0);                      // 不盲发 abort
 });
 
 test('/stop: abortChat 悬挂时防御性超时——诚实文案不谎报"已中止"（G4/D13）', async () => {
