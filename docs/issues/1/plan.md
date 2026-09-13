@@ -1446,7 +1446,7 @@ export class TokenManager {
 - Consumes: `TokenManager`（Task 8）、`Logger`（Task 4）。
 - Produces: `RobotReplyer.sendOtoMarkdown(robotCode, userIds, title, text)` → `POST /v1.0/robot/oToMessages/batchSend`；`sendGroupMarkdown(robotCode, openConversationId, title, text)` → `POST /v1.0/robot/groupMessages/send`；msgKey `sampleMarkdown`，msgParam=`JSON.stringify({title,text})`，头 `x-acs-dingtalk-access-token`；非 2xx / 网络错误 → error 日志 + 抛错（不吞）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/robot-replyer.test.ts
@@ -1504,9 +1504,9 @@ test('非 2xx：抛带响应体的错误（不吞）', async () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/robot-replyer.test.ts` Expected: FAIL — `Cannot find module`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/robot-replyer.test.ts` Expected: FAIL — `Cannot find module`。
 
-- [ ] **Step 3: 实现** `src/openapi/robot.ts`
+- [x] **Step 3: 实现** `src/openapi/robot.ts`
 
 ```ts
 import type { Logger } from '../logger.js';
@@ -1562,9 +1562,9 @@ export class RobotReplyer {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/robot-replyer.test.ts` Expected: PASS（3 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/robot-replyer.test.ts` Expected: PASS（3 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/robot.ts tests/unit/robot-replyer.test.ts && git commit -m "feat(openapi): markdown reply client for oToMessages/groupMessages endpoints"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/robot.ts tests/unit/robot-replyer.test.ts && git commit -m "feat(openapi): markdown reply client for oToMessages/groupMessages endpoints"`
 
 ### Task 10: Echo handler + Gateway 装配 + 全链路集成测试
 
