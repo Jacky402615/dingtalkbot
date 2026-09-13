@@ -162,3 +162,128 @@ test('runCommand D3: dispatch 装配——/help 网关应答、陌生 p2p 拒绝
   expect(md[1]!.text).toContain('未授权');            // 拒绝文本
   expect(md[2]!.text).toContain('回合输出');          // 正常回合仍完整走 D2 链路
 });
+
+// ---- D4（issue #4）：媒体装配线 ----
+import { mkdirSync, utimesSync } from 'node:fs';
+import type { MediaHandler, MediaOutcome } from '../../src/media/attachments.js';
+import type { InboundRobotMessage } from '../../src/transport/types.js';
+
+function makeD4Media(handled: string[], failIds: string[] = []): MediaHandler {
+  return {
+    handle: async (m: InboundRobotMessage): Promise<MediaOutcome | null> => {
+      handled.push(`${m.msgtype}:${m.msgId}`);
+      if (failIds.includes(m.msgId)) return { kind: 'error', errorText: '附件下载失败：下载服务返回 HTTP 400。请重新发送该附件。' };
+      // richText 载荷按序提取文本段（模拟真实服务的 text 提取——集成层验证混排组装）
+      const els = (m.raw as { content?: { richText?: unknown[] } })?.content?.richText;
+      const text = Array.isArray(els)
+        ? els.filter((e): e is { text: string } => typeof (e as { text?: unknown })?.text === 'string')
+            .map((e) => e.text).join(' ') : null;
+      return { kind: 'ok', text, notes: ['[附件 image] 已下载：`/uploads/a.png`', '[附件说明] 不可信'] };
+    },
+  };
+}
+
+test('runCommand D4: 媒体装配——picture 经 dispatch→agent→runner prompt 含注记；错误/陌生路径正确（AC4/鉴权装配面）', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'dtb-run-d4-'));
+  const paths = bootstrapWorkspace(ws);
+  saveBotEnv(paths.botDir, { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths.accessFile, JSON.stringify({ admin: [], approved: ['st1'], groups: [] }));
+  const prompts: string[] = [];
+  const fakeRunner = {
+    run: async (req: TurnRequest): Promise<TurnResult> => {
+      prompts.push(req.prompt);
+      return { ok: true, outputText: '已收到图片', errorText: '', durationMs: 1 };
+    },
+    killAll: () => {},
+  } as unknown as ClaudeRunner;
+  const md: Array<{ kind: string; text: string }> = [];
+  const replyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ kind: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ kind: 'group', text }); },
+  } as unknown as RobotReplyer;
+  const handled: string[] = [];
+  const client = new FakeDwClient();
+  await runCommand(ws, {
+    transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
+    depsOverrides: { runner: fakeRunner, replyer, media: makeD4Media(handled, ['err1']) },
+  }, noExit);
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'pic1', msgtype: 'picture', text: undefined, content: { downloadCode: 'dc' } });
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'err1', msgtype: 'picture', text: undefined, content: { downloadCode: 'dc2' } });
+  client.emitRobotMessage({ ...P2P_PAYLOAD, msgId: 'str1', senderStaffId: 'stranger', msgtype: 'picture', text: undefined, content: { downloadCode: 'dc3' } });
+  await new Promise((r) => setTimeout(r, 150));
+  expect(prompts).toHaveLength(1);                          // err1 终态不入队；stranger 被 dispatch 拒
+  expect(prompts[0]).toContain('[附件 image] 已下载：`/uploads/a.png`');
+  expect(prompts[0]).toContain('[Context: sender=n, staffId=st1, chat=c1 (p2p)]');
+  expect(md.map((x) => x.text).join('\n')).toContain('已收到图片'); // 回合输出照常送达
+  expect(md.map((x) => x.text).join('\n')).toContain('附件下载失败'); // AC4 错误回复
+  expect(md.map((x) => x.text).join('\n')).toContain('未授权');      // 陌生媒体消息同样被拒（dispatch 不变）
+  expect(handled).toEqual(['picture:pic1', 'picture:err1']); // stranger 未达 media（鉴权先行）
+});
+
+test('runCommand D4: 白名单群 @ 发 richText（文本+图混排）——群会话链路照常走注记 prompt 与群回复（群 richText 平台投递面）', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'dtb-run-d4g-'));
+  const paths = bootstrapWorkspace(ws);
+  saveBotEnv(paths.botDir, { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths.accessFile, JSON.stringify({ admin: [], approved: [], groups: ['cidG'] }));
+  const prompts: string[] = [];
+  const fakeRunner = {
+    run: async (req: TurnRequest): Promise<TurnResult> => {
+      prompts.push(req.prompt);
+      return { ok: true, outputText: '群图已收', errorText: '', durationMs: 1 };
+    },
+    killAll: () => {},
+  } as unknown as ClaudeRunner;
+  const md: Array<{ kind: string; text: string }> = [];
+  const replyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ kind: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ kind: 'group', text }); },
+  } as unknown as RobotReplyer;
+  const handled: string[] = [];
+  const client = new FakeDwClient();
+  await runCommand(ws, {
+    transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
+    depsOverrides: { runner: fakeRunner, replyer, media: makeD4Media(handled) },
+  }, noExit);
+  client.emitRobotMessage({ msgId: 'g1', conversationId: 'cidG', conversationType: '2', senderStaffId: 'st9',
+    senderNick: '群友', robotCode: 'rc1', msgtype: 'richText',
+    content: { richText: [{ text: '问题示例图如下：' }, { type: 'picture', downloadCode: 'dcg' }, { text: '通过以上示意图' }] } });
+  await new Promise((r) => setTimeout(r, 150));
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain('[Context: sender=群友, staffId=st9, chat=cidG (group)]');
+  expect(prompts[0]).toContain('问题示例图如下： 通过以上示意图');            // richText 文本按序提取进 prompt
+  expect(prompts[0]).toContain('[附件 image] 已下载：`/uploads/a.png`');   // 群注记进 prompt
+  expect(handled).toEqual(['richText:g1']);                                 // 群 richText 到达媒体层
+  expect(md.some((x) => x.kind === 'group' && x.text.includes('群图已收'))).toBe(true); // 群回复通道
+});
+
+test('runCommand D4: mediaFactory 接到真实装配参数（uploadsDir/mediaMaxBytes 自 config）+ prune 启动即清理旧文件', async () => {
+  const ws = mkdtempSync(join(tmpdir(), 'dtb-run-d4b-'));
+  const paths = bootstrapWorkspace(ws);
+  saveBotEnv(paths.botDir, { clientId: 'ck', clientSecret: 'cs' });
+  writeFileSync(paths.configFile, JSON.stringify({ media_max_bytes: 4096 }));
+  writeFileSync(paths.accessFile, JSON.stringify({ admin: [], approved: ['st1'], groups: [] }));
+  // 种一个 31 天前的旧文件（prune 启动 kick 应删）
+  const oldDay = join(paths.uploadsDir, '2026-08-01');
+  mkdirSync(oldDay, { recursive: true });
+  const oldFile = join(oldDay, 'x.png');
+  writeFileSync(oldFile, 'x');
+  const oldTime = new Date(Date.now() - 31 * 86_400_000); // utimes 数字=秒——用 Date 对象
+  utimesSync(oldFile, oldTime, oldTime);
+  const factoryArgs: Array<{ uploadsDir: string; maxBytes: number }> = [];
+  const fakeRunner = { run: async (): Promise<TurnResult> => ({ ok: true, outputText: '', errorText: '', durationMs: 1 }), killAll: () => {} } as unknown as ClaudeRunner;
+  const fakeReplyer = { sendOtoMarkdown: async () => {}, sendGroupMarkdown: async () => {} } as unknown as RobotReplyer;
+  const client = new FakeDwClient();
+  let capturedShutdown: ((sig: string) => Promise<void>) | null = null;
+  const exits: number[] = [];
+  const recordingExit = (code: number): never => { exits.push(code); throw new Error('exit-sentinel'); };
+  await runCommand(ws, {
+    transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
+    depsOverrides: { runner: fakeRunner, replyer: fakeReplyer },
+    mediaFactory: (args) => { factoryArgs.push(args); return makeD4Media([]); },
+    signalHook: (handler) => { capturedShutdown = handler; },
+  }, recordingExit);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(existsSync(oldFile)).toBe(false);                     // 真实 startPruneLoop 已随启动执行（AC5 装配面）
+  expect(factoryArgs).toEqual([{ uploadsDir: paths.uploadsDir, maxBytes: 4096 }]); // 装配参数真实（config 键生效）
+  await expect(capturedShutdown!('SIGTERM')).rejects.toThrow('exit-sentinel'); // 关停完整走完（pruneLoop.stop 路径）
+});

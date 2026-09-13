@@ -8,6 +8,7 @@ import type { SessionStore, SessionRecord } from '../agent/session-store.js';
 import type { TurnQueue } from '../agent/turn-queue.js';
 import type { ResolvedConfig } from '../config.js';
 import type { Logger } from '../logger.js';
+import type { MediaHandler } from '../media/attachments.js';
 import { stripLeadingMention, isNumericReply, renderQuestionList, parseNumericReply } from '../agent/question-bridge.js';
 
 // msgId 去重已上收 dispatch 层（D3 D10：原子占位/失败释放）；本层只管会话回合。
@@ -22,6 +23,7 @@ export interface AgentHandlerDeps {
   config: ResolvedConfig;
   logger: Logger;
   workspace: string;
+  media: MediaHandler; // D4：媒体消息（picture/file/audio/video/richText）下载与注记
 }
 
 export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandler {
@@ -35,34 +37,61 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
   };
 
   return async (m: InboundRobotMessage) => {
-    if (m.msgtype !== 'text' || m.textContent === null || m.textContent.trim() === '') {
-      deps.logger.warn('session', `丢弃非文本/空消息 msgId=${m.msgId} msgtype=${m.msgtype} kind=${m.conversationKind}`);
-      return;
-    }
     if (m.conversationKind !== 'p2p' && m.conversationKind !== 'group') {
       deps.logger.warn('session', `未知会话类型，丢弃 msgId=${m.msgId}`);
-      return;
-    }
-
-    const text = m.conversationKind === 'group' ? stripLeadingMention(m.textContent) : m.textContent;
-    if (text.trim() === '') {
-      deps.logger.warn('session', `群消息剥 @ 后为空，丢弃 msgId=${m.msgId}`);
       return;
     }
     const chatKey = m.conversationKind === 'p2p' ? `p2p:${m.senderStaffId}` : `group:${m.conversationId}`;
     const contextPrefix = `[Context: sender=${m.senderNick}, staffId=${m.senderStaffId}, chat=${m.conversationId} (${m.conversationKind})]`;
 
+    let text: string | null = null;        // 用户文本（媒体消息可为 null）
+    let attachmentNotes: string[] = [];
+    if (m.msgtype === 'text') {
+      if (m.textContent === null || m.textContent.trim() === '') {
+        deps.logger.warn('session', `丢弃非文本/空消息 msgId=${m.msgId} msgtype=${m.msgtype} kind=${m.conversationKind}`);
+        return;
+      }
+      text = m.conversationKind === 'group' ? stripLeadingMention(m.textContent) : m.textContent;
+      if (text.trim() === '') {
+        deps.logger.warn('session', `群消息剥 @ 后为空，丢弃 msgId=${m.msgId}`);
+        return;
+      }
+    } else {
+      // D4 媒体路径（G8）：忙线预检（与 enqueue 同谓词 q.depth >= maxPerChat）先于下载——满则不烧配额；
+      // 下载失败终态回复后 return（不 beginTurn 不入队，不 spawn 会话）；TOCTOU 由下方 enqueue false 兜底。
+      if (deps.queue.depthOf(chatKey) >= deps.config.queueMaxPerChat) {
+        deps.logger.warn('session', `chat=${chatKey} 忙线（媒体预检），拒绝 msgId=${m.msgId}`);
+        await sendMarkdown(m, BUSY_TEXT);
+        return;
+      }
+      const outcome = await deps.media.handle(m);
+      if (outcome === null) return; // service 已 warn（非媒体/载荷不可解析）——保持 D2 丢弃语义
+      if (outcome.kind === 'error') {
+        deps.logger.warn('session', `媒体下载失败 msgId=${m.msgId}: ${outcome.errorText}`);
+        await sendMarkdown(m, outcome.errorText); // 发送失败上抛 → dispatch release → transport 有界重试
+        return;
+      }
+      text = outcome.text;
+      attachmentNotes = outcome.notes;
+    }
+
     // 到达时判定：TTL 与 pending 应答都按此刻盘面决定（decisions D4）
     const { record, resume } = deps.store.beginTurn(chatKey);
-    let prompt = `${contextPrefix}\n${text}`;
+    // G9 零变化公式：无注记时与原 `${contextPrefix}\n${text}` 字节等价；有注记时 text 有无各一段式
+    let prompt = attachmentNotes.length > 0
+      ? (text !== null && text.trim() !== ''
+          ? `${contextPrefix}\n${text}\n\n${attachmentNotes.join('\n\n')}`
+          : `${contextPrefix}\n\n${attachmentNotes.join('\n\n')}`)
+      : `${contextPrefix}\n${text ?? ''}`;
     let isAnswerTurn = false;
     let answeredToolUseId: string | null = null;
-    if (record.pendingQuestion !== undefined && isNumericReply(text)) {
+    // 数字应答门控=仅 text 消息（richText 提取的数字文本是媒体配文，不当应答——注记不被丢弃）
+    if (record.pendingQuestion !== undefined && m.msgtype === 'text' && text !== null && isNumericReply(text)) {
       const parsed = parseNumericReply(text, record.pendingQuestion);
       if (parsed.kind === 'answer') {
         isAnswerTurn = true;
         answeredToolUseId = record.pendingQuestion.toolUseId;
-        prompt = `${contextPrefix}\n${parsed.answerText}`;
+        prompt = `${contextPrefix}\n${parsed.answerText}`; // 数字应答只可能是 text 消息——注记不参与
       } else {
         await sendMarkdown(m, parsed.message); // help：不进 agent，pending 保留（msgId 占位在 dispatch 层）
         return;
@@ -77,7 +106,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       if (isAnswerTurn && fresh?.pendingQuestion?.toolUseId !== answeredToolUseId) {
         deps.logger.warn('session', `chat=${chatKey} 应答的目标问题已被覆盖，降级为普通消息`);
         answerTurn = false;
-        effectivePrompt = `${contextPrefix}\n${text}`;
+        effectivePrompt = `${contextPrefix}\n${text ?? ''}`; // 类型适配：text 现为 string|null（answerTurn 语义下必为 string，行为不变）
       }
 
       // 盘面会话对账（code-review 修复）：排队期间会话可能已被作废（首回合失败 delete）

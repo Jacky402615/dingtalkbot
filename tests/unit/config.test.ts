@@ -51,3 +51,14 @@ test('resolveConfig: 非法数值/未知权限模式 → warn + 默认', () => {
   expect(cfg.agentPermissionMode).toBe(DEFAULT_CONFIG.agentPermissionMode);
   expect(lines.filter((l) => l.includes('config')).length).toBeGreaterThanOrEqual(3);
 });
+
+// ---- D4（issue #4）media_max_bytes ----
+test('config D4: media_max_bytes 默认 20 MiB；非法值 warn 回默认；合法值生效', () => {
+  const warns: string[] = [];
+  const logger = { debug() {}, info() {}, warn: (_s: string, m: string) => warns.push(m), error() {} } as never;
+  expect(resolveConfig({}, logger as never).mediaMaxBytes).toBe(20 * 1024 * 1024);
+  expect(resolveConfig({ media_max_bytes: 1024 }, logger as never).mediaMaxBytes).toBe(1024);
+  const bad = resolveConfig({ media_max_bytes: -1 }, logger as never);
+  expect(bad.mediaMaxBytes).toBe(20 * 1024 * 1024);
+  expect(warns.some((w) => w.includes('media_max_bytes'))).toBe(true);
+});

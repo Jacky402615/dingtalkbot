@@ -28,6 +28,7 @@ export interface BotConfig {
   card_stream_min_interval_ms?: number;
   card_stream_min_bytes?: number;
   queue_max_per_chat?: number;
+  media_max_bytes?: number;
 }
 
 export interface ResolvedConfig {
@@ -41,6 +42,7 @@ export interface ResolvedConfig {
   cardStreamMinIntervalMs: number;
   cardStreamMinBytes: number;
   queueMaxPerChat: number;
+  mediaMaxBytes: number;
 }
 
 export const DEFAULT_CONFIG: ResolvedConfig = {
@@ -54,6 +56,7 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
   cardStreamMinIntervalMs: 1_500,
   cardStreamMinBytes: 64,
   queueMaxPerChat: 10,
+  mediaMaxBytes: 20 * 1024 * 1024, // D4：单文件与每消息聚合共用上限（D4/D13）
 };
 
 const POSITIVE_KEYS: Array<[keyof BotConfig & string, keyof ResolvedConfig & string]> = [
@@ -62,6 +65,7 @@ const POSITIVE_KEYS: Array<[keyof BotConfig & string, keyof ResolvedConfig & str
   ['card_stream_min_interval_ms', 'cardStreamMinIntervalMs'],
   ['card_stream_min_bytes', 'cardStreamMinBytes'],
   ['queue_max_per_chat', 'queueMaxPerChat'],
+  ['media_max_bytes', 'mediaMaxBytes'],
 ];
 
 export function resolveConfig(raw: BotConfig, logger?: Logger): ResolvedConfig {
