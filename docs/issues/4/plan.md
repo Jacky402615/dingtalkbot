@@ -1450,7 +1450,7 @@ return async (m: InboundRobotMessage) => {
 - Consumes: `MediaClient`（Task 1）、`AttachmentService`（Task 3）、`startPruneLoop`（Task 4）、`ResolvedConfig.mediaMaxBytes`（Task 5）、`AgentHandlerDeps.media`（Task 6）；`RunOverrides.depsOverrides`（既有——media 可注入）
 - Produces: `RunOverrides.mediaFactory?: (args: { uploadsDir: string; maxBytes: number }) => MediaHandler`（装配参数观测/替换注入点——默认构造真实 AttachmentService）；生产装配完成（媒体链接入 dispatch→agent 管线；prune 循环随网关启停）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/integration/run.test.ts`（复用其 `P2P_PAYLOAD`/`noExit`/`runCommand`+`FakeDwClient` 模式与 fake runner/replyer 注入）：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/integration/run.test.ts`（复用其 `P2P_PAYLOAD`/`noExit`/`runCommand`+`FakeDwClient` 模式与 fake runner/replyer 注入）：
 
 ```ts
 // ---- D4（issue #4）：媒体装配线 ----
@@ -1579,8 +1579,8 @@ test('runCommand D4: mediaFactory 接到真实装配参数（uploadsDir/mediaMax
 
 （`MediaOutcome` 类型 import 自 `../../src/media/attachments.js`；`P2P_PAYLOAD` 覆写 `msgtype`/`content`——`normalizeRobotMessage` 对非 text msgtype 防御透传，`textContent` 为 null。）
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/integration/run.test.ts` Expected: FAIL（AgentHandlerDeps 无 media——typecheck/构造缺字段；媒体消息被丢弃 prompts 空）
-- [ ] **Step 3: Write the minimal implementation** — `src/commands/run.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/integration/run.test.ts` Expected: FAIL（AgentHandlerDeps 无 media——typecheck/构造缺字段；媒体消息被丢弃 prompts 空）
+- [x] **Step 3: Write the minimal implementation** — `src/commands/run.ts`：
 
 ```ts
 // imports 增：
@@ -1614,8 +1614,8 @@ pruneLoop.stop();
 // （启动失败 catch 分支同样补 pruneLoop.stop()——构造成功后失败不残留定时器）
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun install && bun run typecheck && bun test` Expected: 全绿（含既有 run/gateway/agent-session 全部用例——G9 无回归）
-- [ ] **Step 5: Commit** — `git add src/commands/run.ts tests/integration/run.test.ts && git commit -m "feat(d4): run 装配媒体链与 prune 循环（depsOverrides 可注入，shutdown 先停 prune）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun install && bun run typecheck && bun test` Expected: 全绿（含既有 run/gateway/agent-session 全部用例——G9 无回归）
+- [x] **Step 5: Commit** — `git add src/commands/run.ts tests/integration/run.test.ts && git commit -m "feat(d4): run 装配媒体链与 prune 循环（depsOverrides 可注入，shutdown 先停 prune）"`
 
 **Checkpoint B（Task 4–7 完成后）**：`bun install && bun run typecheck && bun test` 全绿——生产链路媒体化完成；`bun run build` 冒烟可编译。
 
