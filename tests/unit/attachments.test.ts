@@ -105,6 +105,9 @@ test('URL 安全校验: 非 https/凭据/localhost/私网字面 IP 拒绝；公�
   expect(() => assertPublicHttpsUrl('https://[2001:2::1]/a')).toThrow('保留地址');    // v6 benchmark 2001:2::/48
   expect(() => assertPublicHttpsUrl('https://[2001:20::1]/a')).toThrow('保留地址');   // ORCHIDv2 2001:20::/28
   expect(() => assertPublicHttpsUrl('https://[2001:10::1]/a')).toThrow('保留地址');   // ORCHID（旧）2001:10::/28
+  expect(() => assertPublicHttpsUrl('https://192.31.196.1/a')).toThrow('保留地址');   // AMGP 192.31.196.0/24
+  expect(() => assertPublicHttpsUrl('https://192.52.193.1/a')).toThrow('保留地址');   // DVMRP 192.52.193.0/24
+  expect(() => assertPublicHttpsUrl('https://[fec0::1]/a')).toThrow('保留地址');      // 站点本地 fec0::/10
   expect(assertPublicHttpsUrl('https://93.184.216.34/a').hostname).toBe('93.184.216.34'); // 公网 v4 放行
   expect(assertPublicHttpsUrl('https://[2a00:1450:4001:81d::200e]/a')).not.toBeNull();    // 公网 v6 放行
 });
@@ -475,5 +478,25 @@ test('service: body.cancel 挂起被 1s 竞速截断且失败可观测（F3）',
   const elapsed = Date.now() - t0;
   expect(elapsed).toBeLessThan(5_000); // 1s 竞速截断（非 30s deadline 级等待）
   expect(logs.some((l) => l.includes('cancel'))).toBe(true); // 可观测（warn 记录竞速超时/失败）
+  expect(cancelled).toBe(true);
+});
+
+test('service: deadline 过期后 cancel 不追加等待——abort 短路（总时长不超 deadline+ε，F2）', async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const t = setInterval(() => { try { controller.enqueue(new Uint8Array([1])); } catch { clearInterval(t); } }, 1);
+    },
+    cancel() { cancelled = true; return new Promise<void>(() => {}); }, // cancel 永挂
+  });
+  const { svc } = makeSvc({
+    deadlineMs: 40,
+    fetchFn: (async () => new Response(body as unknown as BodyInit, { status: 200 })) as unknown as typeof fetch,
+  });
+  const t0 = Date.now();
+  const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+  const elapsed = Date.now() - t0;
+  expect(out).toEqual({ kind: 'error', errorText: '附件下载失败：操作超时。请重新发送该附件。' });
+  expect(elapsed).toBeLessThan(1_000); // deadline 40ms 短路 cancel——无 1s 竞速追加
   expect(cancelled).toBe(true);
 });

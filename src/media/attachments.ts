@@ -154,7 +154,9 @@ function isPrivateIpv4(host: string): boolean {
     || (a === 192 && b === 88 && c === 99)                     // 6to4 中继 192.88.99.0/24
     || (a === 198 && (b === 18 || b === 19))                   // benchmark 198.18.0.0/15
     || (a === 198 && b === 51 && c === 100)                    // TEST-NET-2 198.51.100.0/24
-    || (a === 203 && b === 0 && c === 113);                    // TEST-NET-3 203.0.113.0/24
+    || (a === 203 && b === 0 && c === 113)                      // TEST-NET-3 203.0.113.0/24
+    || (a === 192 && b === 31 && c === 196)                    // AMGP 192.31.196.0/24
+    || (a === 192 && b === 52 && c === 193);                   // DVMRP 192.52.193.0/24——至此 IANA v4 特殊用途注册表穷尽
 }
 
 // IPv6 判定基于 WHATWG URL 归一化后的形态（v4 映射 ::ffff:10.0.0.1 会被归一为 ::ffff:a00:1——按前缀拒）
@@ -171,7 +173,8 @@ function isPrivateIpv6(host: string): boolean {
   if (h.startsWith('100::')) return true;        // discard-only 100::/64
   if (/^2001:(1[0-9a-f]:|2:|2[0-9a-f]:)/.test(h)) return true; // ORCHID 2001:10::/28 + benchmark 2001:2::/48 + ORCHIDv2 2001:20::/28
   return h.startsWith('fc') || h.startsWith('fd')           // ULA fc00::/7
-    || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb'); // link-local fe80::/10
+    || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb') // link-local fe80::/10
+    || h.startsWith('fec') || h.startsWith('fed') || h.startsWith('fee') || h.startsWith('fef'); // 站点本地 fec0::/10（deprecated）——至此 IANA v6 注册表穷尽
 }
 
 // 下载目标安全门（D15）：仅 https、无凭据、非 localhost/私网字面 IP；错误信息只含 host（G7 脱敏）。
@@ -391,22 +394,27 @@ export class AttachmentService implements MediaHandler {
       throw new MediaTerminalError(signal.aborted ? '操作超时' : '文件写入失败', signal.aborted ? 'deadline' : 'fs');
     } finally {
       // 未排空的响应体（含 dateDir/openSync/超限中止路径的失败）cancel——有界归还连接（F3）
-      if (!drained) await this.cancelBody(resp);
+      if (!drained) await this.cancelBody(resp, signal);
     }
   }
 
-  // 响应体取消：1s 有界竞速（cancel 挂起不得越过媒体 deadline 语义）；挂起截断与失败均落 warn（可观测）
-  private async cancelBody(resp: Response): Promise<void> {
+  // 响应体取消：deadline 已过 → 立即返回（不追加等待，保持 30s 上限）；否则 1s 有界竞速；
+  // 挂起截断与失败均落 warn（可观测）；竞速定时器显式清理。
+  private async cancelBody(resp: Response, signal?: AbortSignal): Promise<void> {
     if (resp.body === null) return;
+    if (signal?.aborted) return; // deadline 已消耗完——cancel 尝试不再占用时间预算
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
         resp.body.cancel().then(() => { settled = true; }),
-        new Promise<void>((r) => { const t = setTimeout(() => r(), 1_000); t.unref?.(); }),
+        new Promise<void>((r) => { timer = setTimeout(() => r(), 1_000); timer.unref?.(); }),
       ]);
-      if (!settled) this.opts.logger.warn('media', '响应体 cancel 1s 未完成（竞速截断，连接可能滞留）');
+      if (!settled && !signal?.aborted) this.opts.logger.warn('media', '响应体 cancel 1s 未完成（竞速截断，连接可能滞留）');
     } catch (err) {
       this.opts.logger.warn('media', `响应体 cancel 失败（连接可能滞留）: ${String(err)}`);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
@@ -424,7 +432,7 @@ export class AttachmentService implements MediaHandler {
         throw new MediaTerminalError(`网络错误（${url.host}）`, 'download');
       }
       if ([301, 302, 303, 307, 308].includes(resp.status)) {
-        await this.cancelBody(resp); // 未消费体取消——有界+可观测归还连接
+        await this.cancelBody(resp, signal); // 未消费体取消——有界+可观测归还连接
         const loc = resp.headers.get('location');
         if (loc === null) throw new MediaTerminalError(`重定向缺少目标（${url.host}）`, 'download');
         // 解析失败（畸形 Location 的 new URL TypeError 含原始 URL）统一收口——绝不外泄（G7）
@@ -434,7 +442,7 @@ export class AttachmentService implements MediaHandler {
         continue;
       }
       if (!resp.ok) {
-        await this.cancelBody(resp);
+        await this.cancelBody(resp, signal);
         throw new MediaTerminalError(`下载失败（HTTP ${resp.status}，${url.host}）`, 'download', resp.status);
       }
       return resp;
