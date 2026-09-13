@@ -57,14 +57,20 @@ test('runCommand: 真实装配线——消息 → session handler → runner 收
     },
     killAll: () => {},
   } as unknown as ClaudeRunner;
+  const md: Array<{ kind: string; text: string }> = [];
+  const fakeReplyer = {
+    sendOtoMarkdown: async (_r: string, _u: string[], _t: string, text: string) => { md.push({ kind: 'oto', text }); },
+    sendGroupMarkdown: async (_r: string, _c: string, _t: string, text: string) => { md.push({ kind: 'group', text }); },
+  } as unknown as RobotReplyer; // HTTP 边界 fake（code-review F4）：模板空 → 回退 markdown 不打真 API
   const client = new FakeDwClient();
   await runCommand(ws, {
     transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
-    depsOverrides: { runner: fakeRunner },
+    depsOverrides: { runner: fakeRunner, replyer: fakeReplyer },
   }, noExit);
   client.emitRobotMessage(P2P_PAYLOAD);
   await new Promise((r) => setTimeout(r, 150));
   expect(seen[0]).toContain('[Context: sender=n, staffId=st1, chat=c1 (p2p)]');
+  expect(md.some((x) => x.text.includes('r'))).toBe(true); // markdown 回退走 fake
 });
 
 test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回合不再执行', async () => {
@@ -89,13 +95,17 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
     close: () => { order.push('queue.close'); realQueue.close(); },
     closed: false,
   } as unknown as TurnQueue;
+  const fakeReplyer2 = {
+    sendOtoMarkdown: async () => {},
+    sendGroupMarkdown: async () => {},
+  } as unknown as RobotReplyer; // HTTP 边界 fake（code-review F4）
   const client = new FakeDwClient();
   let capturedShutdown: ((sig: string) => Promise<void>) | null = null;
   const exits: number[] = [];
   const recordingExit = (code: number): never => { exits.push(code); throw new Error('exit-sentinel'); };
   await runCommand(ws2, {
     transportFactory: (opts) => new DingtalkSdkTransport({ ...opts, backoffBaseMs: 5, clientFactory: () => client }),
-    depsOverrides: { runner: fakeRunner, queue: wrappedQueue },
+    depsOverrides: { runner: fakeRunner, queue: wrappedQueue, replyer: fakeReplyer2 },
     signalHook: (handler) => { capturedShutdown = handler; },
   }, recordingExit);
   expect(capturedShutdown).not.toBeNull();

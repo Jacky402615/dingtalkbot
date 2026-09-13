@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readdirSync, statSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionStore } from '../../src/agent/session-store.js';
@@ -162,4 +162,19 @@ test('store D3: 跨重启复活防线——磁盘 epoch 大于内存代时 load 
   s2.reset('p2p:st1');                                // /new → 内存代 1，文件删除
   s2.persist(snap!);                                  // 在飞/排队回合持取值快照落盘（epoch 0 < 1）
   expect(s2.load('p2p:st1')).toBeNull();              // 拦截——旧 sessionId 不复活
+});
+
+test('store D3: reset 删除失败响亮上抛，不谎报重置（code-review F2）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3e-'));
+  const errs: string[] = [];
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000,
+    logger: { debug() {}, info() {}, warn() {}, error: (_s, m) => errs.push(m) } });
+  store.beginTurn('p2p:st1');                          // 会话文件就位
+  chmodSync(dir, 0o555);                               // 目录去写位 → rename 失败
+  try {
+    expect(() => store.reset('p2p:st1')).toThrow();
+    expect(errs.some((e) => e.includes('删除失败'))).toBe(true);
+  } finally {
+    chmodSync(dir, 0o755);                             // 恢复，供清理
+  }
 });

@@ -27,6 +27,10 @@ export function createDispatchHandler(deps: DispatchDeps): MessageHandler {
       return;
     }
     try {
+      if (m.conversationKind !== 'p2p' && m.conversationKind !== 'group') {
+        deps.logger.warn('dispatch', `未知会话类型 kind=${m.conversationKind} msgId=${m.msgId}，丢弃（不鉴权不进命令/agent）`);
+        return; // fail-closed：unknown 不进命令（sendChatMarkdown 会误当群发）也不进 agent
+      }
       if (m.conversationKind === 'p2p') {
         const list = deps.loadAccess();
         if (tierOf(list, m.senderStaffId) === 'unknown') {

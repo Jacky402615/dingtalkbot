@@ -39,7 +39,7 @@
 ## Commands / Access（D3 契约）
 
 - 处理顺序：msgId 去重（同步占位/失败释放）→ p2p 鉴权 → 群白名单 → 命令解析 → agent 委派；access 加载/解析异常 fail-closed 映射为正常回复（不上抛），其余处理失败（含回复发送失败）照旧上抛由 transport 有界重试（≤3 次/50s 预算，占位已释放可重入）（CI-verified）。
-- 命令：`/new`（reset 会话——epoch 代际防在飞/排队回合复活旧 id；在飞回合不杀）、`/stop`（仅杀该 chat 在飞回合，TERM→5s→KILL；不清排队，确认文案披露队列深度；防御性超时诚实文案；无在飞回提示）、`/status`（p2p：连接+uptime+会话哈希明细+admin/approved 名单；群：仅概览与计数——明细/名单不向全群广播）、`/help`。剥 @ 后 trim、大小写不敏感、精确匹配、无参数；未知 `/xxx` 透传 agent 当普通消息（CI-verified）。
+- 命令：`/new`（reset 会话——epoch 代际防在飞/排队回合复活旧 id，删除失败响亮报失败不谎报；在飞回合不杀）、`/stop`（仅杀该 chat 在飞回合，TERM→5s→KILL；不清排队，确认文案披露排队数（不含收尾中的当前回合）；防御性超时诚实文案；无在飞回提示）、`/status`（p2p：连接+uptime+会话哈希明细+admin/approved 名单；群：仅概览与计数——明细/名单不向全群广播）、`/help`。剥 @ 后 trim、大小写不敏感、精确匹配、无参数；未知 `/xxx` 透传 agent 当普通消息（CI-verified）。
 - 访问：`.bot/access.json` `{admin,approved,groups}`（手工编辑，每消息读盘，ENOENT 单次重试容忍原子替换，解析失败响亮限频 warn 后 fail-closed 全拒含 admin——修文件即恢复）；p2p 按 `senderStaffId` ∈ admin∪approved 放行，admin v1 仅信息性；陌生 p2p 收固定泛化拒绝文本（不泄露命令面/配置面），不 spawn 会话（CI-verified）。
 - 群策略：仅 `openConversationId` ∈ groups 白名单的群内 @ 被处理（任意成员——群授权=owner 拉群；群成员治理是 owner 责任，此为明示信任边界）；非白名单群 @ 零回复 + 一条 warn 日志（CI-verified）。
 - live 验证清单：真实群里 @ 触发四命令；管理员外同事 p2p 收到拒绝；把群加入/移出 groups 的即时生效；/new 长回合中重置；/stop 长回合中止与卡终止态。

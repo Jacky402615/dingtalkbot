@@ -31,8 +31,15 @@ export class SessionStore {
   private epochOf(chatKey: string): number { return this.epochs.get(chatKey) ?? 0; }
 
   reset(chatKey: string): void {
+    const file = this.fileOf(chatKey);
+    try {
+      if (existsSync(file)) renameSync(file, `${file}.dead-${Date.now()}`);
+    } catch (err) {
+      // 删除失败不得谎报重置成功：旧文件残留会使 load 复活旧 sessionId（D3 code-review F2）
+      this.opts.logger?.error('session', `chat=${chatKey} 会话文件删除失败（/new 重置失败）: ${String(err)}`);
+      throw err; // 响亮上抛——/new 回复失败文案，不进 agent
+    }
     this.epochs.set(chatKey, this.epochOf(chatKey) + 1);
-    this.delete(chatKey);
     this.opts.logger?.info('session', `chat=${chatKey} 会话已重置（epoch=${this.epochOf(chatKey)}）`);
   }
 

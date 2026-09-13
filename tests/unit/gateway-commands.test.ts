@@ -25,7 +25,7 @@ function makeDeps(over: Record<string, unknown> = {}) {
   const runnerCalls: string[] = [];
   const runner = { activeCountOf: (_c: string) => 0, abortChat: async (c: string, r: string) => { runnerCalls.push(`${c}:${r}`); return 1; } };
   const deps = {
-    replyer, store, queue: { depthOf: () => 0 }, runner,
+    replyer, store, queue: { queuedDepthOf: () => 0 }, runner,
     loadAccess: () => ({ admin: ['st0'], approved: ['st1'], groups: ['cidG'] }) as AccessList,
     status: () => ({ pid: 1, startedAt: new Date('2026-09-13T10:00:00Z').toISOString(), transport: 'connected', detail: '已连接并订阅', updatedAt: new Date().toISOString() }) as ConnectionStateSnapshot,
     logger: quiet,
@@ -74,7 +74,7 @@ test('/stop: 无在飞回提示；有在飞先回"正在中止"再 abort，终�
   const calls: string[] = [];
   const { deps, md } = makeDeps({
     runner: { activeCountOf: () => 1, abortChat: async (c: string, r: string) => { calls.push(`${c}:${r}`); return 1; } },
-    queue: { depthOf: () => 2 },
+    queue: { queuedDepthOf: () => 2 },
   });
   const exec = createCommandExecutor(deps as never);
   await exec('stop', msg({ senderStaffId: 'stX' })); // fake 的 activeCountOf 恒 1 → 走中止路径
@@ -129,4 +129,13 @@ test('/status: p2p 含连接/会话哈希明细/名单；群内仅概览+计数�
   expect(group).not.toContain('st0');                  // 名单不进群
   expect(group).not.toContain('[p2p]');               // 会话明细不进群
   expect(group).toMatch(/会话：1 个/);                  // 计数
+});
+
+test('/new: store.reset 删除失败 → 失败文案，不谎报重置（code-review F2）', async () => {
+  const { deps, md } = makeDeps();
+  const failing = { ...deps.store, reset: () => { throw new Error('EACCES'); } };
+  const exec = createCommandExecutor({ ...deps, store: failing } as never);
+  await exec('new', msg());
+  expect(md).toHaveLength(1);
+  expect(md[0]!.text).toContain('重置失败');
 });

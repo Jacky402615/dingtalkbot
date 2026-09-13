@@ -156,3 +156,12 @@ test('G5: 重复 msgId 静默丢弃；失败路径 release 后同 msgId 可重�
   await handler3(p2p({ msgId: 'f1', senderStaffId: 'x', textContent: 'hi' })); // 同 msgId 经修复后的链
   expect(retried).toBe(true);                     // release 已发生——未误判重复
 });
+
+test('G1: unknown 会话类型——不鉴权不进命令/agent，静默丢弃留 warn（code-review r2）', async () => {
+  const h = makeHarness();
+  await h.handler(p2p({ msgId: 'u1', conversationKind: 'unknown' as never, textContent: '/help' }));
+  expect(h.md).toHaveLength(0);
+  expect(h.cmds).toHaveLength(0);
+  expect(h.agentMsgs).toHaveLength(0);
+  expect(h.warns.some((w) => w.includes('未知会话类型'))).toBe(true);
+});

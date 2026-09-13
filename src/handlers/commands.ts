@@ -37,7 +37,7 @@ export async function sendChatMarkdown(replyer: RobotReplyer, m: InboundRobotMes
 export interface CommandDeps {
   replyer: RobotReplyer;
   store: SessionStore;
-  queue: { depthOf(chatKey: string): number };
+  queue: { queuedDepthOf(chatKey: string): number }; // 仅排队未开始（D3 code-review：在飞收尾不计入）
   runner: { activeCountOf(chatKey: string): number; abortChat(chatKey: string, reason: string): Promise<number> };
   loadAccess: () => AccessList;
   status: () => ConnectionStateSnapshot | null;
@@ -87,7 +87,14 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
     if (name === 'status') { await sendChatMarkdown(deps.replyer, m, renderStatus(m, deps)); return; }
     if (name === 'new') {
       const inFlight = deps.runner.activeCountOf(chatKey) > 0;
-      deps.store.reset(chatKey);
+      try {
+        deps.store.reset(chatKey);
+      } catch (err) {
+        // 删除失败不谎报成功（reset 响亮上抛）；也不上抛——命令层收容后回失败文案
+        deps.logger.error('cmd', `chat=${chatKey} /new 重置失败: ${String(err)}`);
+        await sendChatMarkdown(deps.replyer, m, '会话重置失败：会话文件无法删除（检查磁盘/权限后重试）。');
+        return;
+      }
       deps.logger.info('cmd', `chat=${chatKey} /new 会话重置${inFlight ? '（在飞回合继续收尾）' : ''}`);
       await sendChatMarkdown(deps.replyer, m, inFlight
         ? '会话已重置：下一条消息开始全新对话。当前在飞回合不受影响，将继续收尾，其输出仍会送达。'
@@ -96,7 +103,7 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
     }
     // /stop
     if (deps.runner.activeCountOf(chatKey) === 0) {
-      const depth0 = deps.queue.depthOf(chatKey);
+      const depth0 = deps.queue.queuedDepthOf(chatKey);
       await sendChatMarkdown(deps.replyer, m, depth0 > 0
         ? `当前无在飞回合（队列中仍有 ${depth0} 条排队消息）。`
         : '当前无在飞回合。');
@@ -112,7 +119,7 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
       new Promise<void>((r) => { guardTimer = setTimeout(() => { timedOut = true; r(); }, guardMs); }),
     ]);
     if (guardTimer !== null) clearTimeout(guardTimer);
-    const depth = deps.queue.depthOf(chatKey);
+    const depth = deps.queue.queuedDepthOf(chatKey);
     if (timedOut) {
       // 诚实文案：超时意味着 escalation 链未按预期 settle——不谎报"已中止"（D13）
       deps.logger.error('cmd', `chat=${chatKey} /stop 中止未在 ${guardMs}ms 内完成（防御性超时先行返回）`);
