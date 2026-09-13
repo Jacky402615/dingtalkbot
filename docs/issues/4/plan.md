@@ -1110,7 +1110,7 @@ export function startPruneLoop(uploadsDir: string, logger?: Logger, opts: { inte
 **Interfaces:**
 - Produces: `BotConfig.media_max_bytes?: number` / `ResolvedConfig.mediaMaxBytes: number`（默认 `20 * 1024 * 1024`，正数校验走既有 POSITIVE_KEYS——Task 7 消费）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/unit/config.test.ts`（复用其既有 logger 夹具）：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/unit/config.test.ts`（复用其既有 logger 夹具）：
 
 ```ts
 test('config D4: media_max_bytes 默认 20 MiB；非法值 warn 回默认；合法值生效', () => {
@@ -1124,8 +1124,8 @@ test('config D4: media_max_bytes 默认 20 MiB；非法值 warn 回默认；合�
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL（`mediaMaxBytes` 不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/config.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL（`mediaMaxBytes` 不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/config.ts`：
 
 ```ts
 // BotConfig 增键：
@@ -1138,8 +1138,8 @@ mediaMaxBytes: 20 * 1024 * 1024, // D4：单文件与每消息聚合共用上限
 ['media_max_bytes', 'mediaMaxBytes'],
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/config.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(d4): config 键 media_max_bytes（默认 20 MiB，单文件=聚合上限）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/config.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(d4): config 键 media_max_bytes（默认 20 MiB，单文件=聚合上限）"`
 
 ---
 
