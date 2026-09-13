@@ -1639,7 +1639,7 @@ test('handler: 回合失败（!ok）→ 桥 fail 路径（活卡 isError 收终�
   - `runCommand` 装配新增：`loadConfig → resolveConfig`（启动 warn：空模板 markdown-only；bypassPermissions 暴露提示）+ `CardClient` + `ClaudeRunner` + `SessionStore({ttlMs: minutes*60_000})` + `TurnQueue` + `createAgentSessionHandler`；shutdown 序：`queue.close()` → `runner.killAll()` → `gateway.stop()` → pidfile 清理（评审修复：关停后不再 spawn、在飞组杀）。
   - 集成测试（AC1/AC3/AC4 CI 面）：真实 transport（FakeDwClient）+ 真实 handler/store/queue/bridge/throttle + 受控 fake runner + fake HTTP。
 
-- [ ] **Step 1: 写失败集成测试** `tests/integration/agent-round-trip.test.ts`
+- [x] **Step 1: 写失败集成测试** `tests/integration/agent-round-trip.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1787,8 +1787,8 @@ test('round-trip: 卡创建失败 → 恰好一条 markdown 全文 + ack（AC4 C
 
 （AC3 用例的 assemble 用同一默认 `aiCardTemplateId: 'tpl-9'`——卡流量正常但断言只看 runner 事件序；AC4 用例同。）
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/integration/agent-round-trip.test.ts` Expected: FAIL — handler 未接线。
-- [ ] **Step 3: 改 run.ts + 删 echo + run.test.ts 追加**
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/integration/agent-round-trip.test.ts` Expected: FAIL — handler 未接线。
+- [x] **Step 3: 改 run.ts + 删 echo + run.test.ts 追加**
 
 ```ts
 // src/commands/run.ts：RunOverrides 扩展 + 装配替换（生命周期骨架不变）
@@ -1872,8 +1872,8 @@ test('runCommand: 关停序——queue.close 先于 runner.killAll；排队回�
 
 删除 `src/handlers/echo.ts`、`tests/unit/echo.test.ts`、`tests/integration/round-trip.test.ts`（传输层断言由新集成测试承接，decisions D10）。
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun run typecheck && bun test` Expected: 全绿。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add -A && git commit -m "feat(gateway): wire agent session handler, retire echo, full round-trip integration coverage"`
+- [x] **Step 4: 验证 PASS** — Run: `bun run typecheck && bun test` Expected: 全绿。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add -A && git commit -m "feat(gateway): wire agent session handler, retire echo, full round-trip integration coverage"`
 
 **--- 检查点 D：全链路（transport→queue→agent→card）CI 绿 ---**
 
