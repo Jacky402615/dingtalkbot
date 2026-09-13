@@ -87,6 +87,14 @@ test('URL 安全校验: 非 https/凭据/localhost/私网字面 IP 拒绝；公�
   expect(() => assertPublicHttpsUrl('https://999.1.1.1/a')).toThrow('非法下载目标'); // WHATWG IPv4 解析失败——统一收口 fail-closed
   expect(assertPublicHttpsUrl('https://8.8.8.8/a').hostname).toBe('8.8.8.8');
   expect(assertPublicHttpsUrl('https://[2606:4700::6810:85e5]/a').hostname).toBe('[2606:4700::6810:85e5]'); // 公网 v6 放行（hostname 保留方括号）
+  expect(() => assertPublicHttpsUrl('https://100.64.1.1/a')).toThrow('保留地址');   // CGNAT 100.64/10
+  expect(() => assertPublicHttpsUrl('https://224.0.0.1/a')).toThrow('保留地址');    // 多播 224/4
+  expect(() => assertPublicHttpsUrl('https://240.0.0.1/a')).toThrow('保留地址');    // 保留 240/4
+  expect(() => assertPublicHttpsUrl('https://[ff02::1]/a')).toThrow('保留地址');    // v6 多播 ff00::/8
+  expect(() => assertPublicHttpsUrl('https://[2001:db8::1]/a')).toThrow('保留地址'); // v6 文档段
+  expect(() => assertPublicHttpsUrl('https://[2001:0::1]/a')).toThrow('保留地址');  // Teredo
+  expect(() => assertPublicHttpsUrl('https://[2002:8.8.8.8]/a')).toThrow(); // 6to4——URL 解析即非法（fail-closed 收口）；规范形 2002:808:808:: 由前缀拒
+  expect(() => assertPublicHttpsUrl('https://[2002:808:808::1]/a')).toThrow('保留地址');
 });
 
 // ---- Task 3：AttachmentService（下载编排）----
@@ -160,6 +168,7 @@ test('service: AC3——audio/video 归档注记"内容不可解析"；duration 
   expect(a.notes[0]).toContain('voice');
   expect(v.notes[0]).toContain('video');
   expect(v.notes[0]).toContain('时长 5 秒');
+  expect(v.notes[0]).toContain('大小：12 字节'); // G6：归档注记含数值大小元数据
 });
 
 test('service: AC4——交换 HTTP 失败 → 终态错误（安全原因：只含状态码），不留半成品；failed 计数与脱敏 warn（G7/D17）', async () => {
@@ -248,6 +257,7 @@ test('service: G2/G3——超限中止删半成品+注记；corrupt（魔数失�
   expect(over.notes[0]).toContain('附件过大');
   expect(over.notes[1]).toContain('总大小限额');                  // 聚合已耗尽——降级注记
   expect(os_.exchanges).toHaveLength(1);                         // 第二个附件零交换（不烧配额）
+  expect(os_.logs.some((l) => l.includes('附件限额降级') && l.includes('limited='))).toBe(true); // G2：限额降级可观测 warn
   const dayOs = readdirSync(os_.uploadsDir).find((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
   expect(dayOs === undefined || readdirSync(join(os_.uploadsDir, dayOs!)).length === 0).toBe(true); // 半成品已删（空日期目录无害）
   // corrupt：随机字节 + image/png（魔数失败）
@@ -266,9 +276,11 @@ test('service: G2/G3——超限中止删半成品+注记；corrupt（魔数失�
   expect(emptyOut.notes[0]).toContain('损坏');
   // 数量限额：richText 6 图 → 第 6 个降级注记
   const els = Array.from({ length: 6 }, (_, i) => ({ type: 'picture', downloadCode: `dc-${i}` }));
-  const many = await makeSvc().svc.handle(msg('richText', { content: { richText: els } }));
+  const os2 = makeSvc();
+  const many = await os2.svc.handle(msg('richText', { content: { richText: els } }));
   if (many === null || many.kind !== 'ok') throw new Error('数量限额应为 ok 降级结果');
   expect(many.notes.filter((n) => n.includes('数量限额')).length).toBe(1); // 恰一个超限注记
+  expect(os2.logs.some((l) => l.includes('附件限额降级'))).toBe(true);       // G2：数量限额同样 warn
   // 仅未知元素 richText（D9 收紧）：有效结果 + 显式注记（无附件则无不可信 trailer）
   const unk = await makeSvc().svc.handle(msg('richText', { content: { richText: [{ type: 'sticker', id: 'x' }] } }));
   if (unk === null || unk.kind !== 'ok') throw new Error('仅未知元素 richText 应为 ok 结果');
@@ -356,13 +368,22 @@ test('sanitize: Unicode 行分隔符（U+0085/U+2028/U+2029）清洗——防 pr
 // ---- code-review r2 修复回归 ----
 import { symlinkSync } from 'node:fs';
 
-test('service: 日期目录被符号链接占用 → 终态拒绝（下载不逃逸 uploads 树）', async () => {
-  const { svc, uploadsDir } = makeSvc();
+test('service: 日期目录被符号链接占用 → 终态拒绝（不逃逸 uploads 树）；未消费响应体被 cancel（F3）', async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(PNG as unknown as Uint8Array); },
+    cancel() { cancelled = true; },
+  });
+  const { svc, uploadsDir } = makeSvc({
+    fetchFn: (async () => new Response(body as unknown as BodyInit, { status: 200 })) as unknown as typeof fetch,
+  });
   const outside = mkdtempSync(join(tmpdir(), 'dtb-out-'));
-  symlinkSync(outside, join(uploadsDir, localDay())); // 预置符号链接（mkdirSync recursive 会跟随——需拦截）
+  symlinkSync(outside, join(uploadsDir, localDay())); // 预置符号链接（dateDir lstat 拦截）
   const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
   expect(out).toEqual({ kind: 'error', errorText: '附件下载失败：日期目录被符号链接/异物占用。请重新发送该附件。' });
   expect(readdirSync(outside)).toHaveLength(0); // 逃逸目标无写入
+  await new Promise((r) => setTimeout(r, 10));
+  expect(cancelled).toBe(true);                  // post-fetch 失败路径归还连接（F3）
 });
 
 test('sanitize: bidi/零宽控制清洗（U+200B-200F/U+202A-202E/U+2060-2069/U+FEFF）', () => {

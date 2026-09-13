@@ -56,3 +56,15 @@ test('media-client: 外部 signal 透传给 fetch（服务层 30s 总 deadline �
   ac.abort();
   await expect(c.exchangeDownloadUrl('rc', 'dc2', ac.signal)).rejects.toThrow();
 });
+
+test('media-client: token 获取挂起被 abort signal 打断（服务层 deadline 竞速——F6 回归）', async () => {
+  const hangingToken = { getAccessToken: () => new Promise<string>(() => {}) } as never;
+  const c = new MediaClient({
+    tokenManager: hangingToken, logger: log() as never,
+    fetchFn: (async () => new Response('{}', { status: 200 })) as unknown as typeof fetch,
+    apiBase: 'https://api.test',
+  });
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 10);
+  await expect(c.exchangeDownloadUrl('rc', 'dc', ac.signal)).rejects.toThrow();
+});

@@ -134,7 +134,9 @@ function isPrivateIpv4(host: string): boolean {
   const o = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
   if (o.some((n) => n > 255)) return true; // 非法字面量按保留地址拒绝（fail-closed）
   const [a, b] = o as [number, number, number, number];
-  return a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  return a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
+    || (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64/10
+    || a >= 224;                          // 多播 224/4 + 保留 240/4 + 广播 255（fail-closed）
 }
 
 // IPv6 判定基于 WHATWG URL 归一化后的形态（v4 映射 ::ffff:10.0.0.1 会被归一为 ::ffff:a00:1——按前缀拒）
@@ -143,6 +145,11 @@ function isPrivateIpv6(host: string): boolean {
   if (h === '::' || h === '::1') return true;    // unspecified / loopback
   if (h.startsWith('::ffff:')) return true;      // v4 映射（SSRF 绕过面）
   if (h.startsWith('64:ff9b')) return true;      // NAT64 前缀
+  if (h.startsWith('ff')) return true;           // 多播 ff00::/8
+  if (h.startsWith('2001:db8')) return true;     // 文档段 2001:db8::/32
+  const teredo = /^2001:([0-9a-f]{0,4})/.exec(h);
+  if (teredo !== null && (teredo[1] === '' || parseInt(teredo[1], 16) === 0)) return true; // Teredo 2001:0::/32（归一化可压缩零段 2001::x）
+  if (h.startsWith('2002:')) return true;        // 6to4 2002::/16
   return h.startsWith('fc') || h.startsWith('fd')           // ULA fc00::/7
     || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb'); // link-local fe80::/10
 }
@@ -251,6 +258,9 @@ export class AttachmentService implements MediaHandler {
       }
       if (parsed.skippedUnknown > 0) notes.push('[富文本] 消息含不支持的元素类型，已跳过。');
       if (parsed.attachments.length > 0) notes.push(UNTRUSTED_TRAILER); // 无附件（纯富文本注记）不出附件声明
+      if (limited > 0) { // G2：限额降级不止注记——可观测 warn（数量/聚合命中）
+        this.opts.logger.warn('media', `附件限额降级 msgId=${m.msgId} kind=${m.msgtype} limited=${limited} 附件数=${parsed.attachments.length} 上限=${maxAttachments} 预算=${budget.bytes}/${this.opts.maxBytes}字节`);
+      }
       return { kind: 'ok', text: parsed.text, notes };
     } catch (err) {
       const terminal = err instanceof MediaTerminalError ? err
@@ -280,12 +290,14 @@ export class AttachmentService implements MediaHandler {
       throw exchangeError(err); // 安全原因映射（无响应体/URL——G7）
     }
     const resp = await this.fetchWithRedirects(url, signal);
-    const dir = this.dateDir();
-    this.cleanStaleTmp(dir);
-    const tmp = join(dir, `.${randomUUID()}.tmp`); // tmp 名恒真随机（不消耗可注入发布 id 序列）
+    let drained = false; // 响应体是否已完整消费——finally 据此归还未消费体的连接
     let bytes = 0;
     let fd: number | null = null;
+    let tmp = '';
     try {
+      const dir = this.dateDir();
+      this.cleanStaleTmp(dir);
+      tmp = join(dir, `.${randomUUID()}.tmp`); // tmp 名恒真随机（不消耗可注入发布 id 序列）
       fd = openSync(tmp, 'wx', 0o600);
       if (resp.body !== null) {
         for await (const chunk of resp.body as unknown as AsyncIterable<Uint8Array>) {
@@ -299,11 +311,16 @@ export class AttachmentService implements MediaHandler {
             this.opts.logger.warn('media', `附件超限中止 kind=${att.kind} msgId=${m.msgId} 上限=${this.opts.maxBytes}字节`);
             return { result: 'oversize', note: `[附件 ${att.kind}] 附件过大（超过 ${this.opts.maxBytes} 字节限额），未归档；内容不可用。` };
           }
-          // write-all 循环：writeSync 可能短写（中断/边界）——按 bytesWritten 推进，不假设全量落盘
+          // write-all 循环：writeSync 可能短写（中断/边界）——按 bytesWritten 推进；零进展即抛（防自旋）
           let off = 0;
-          while (off < chunk.byteLength) { off += writeSync(fd, chunk, off, chunk.byteLength - off); }
+          while (off < chunk.byteLength) {
+            const n = writeSync(fd, chunk, off, chunk.byteLength - off);
+            if (n <= 0) throw new Error('writeSync 零进展');
+            off += n;
+          }
         }
       }
+      drained = true; // 流完整排空（或无 body）——后续异常不再需要归还连接
       if (signal.aborted) { // 流恰好完整结束但 deadline 已过——不发布过期回合的产物（G1）
         throw new MediaTerminalError('操作超时', 'deadline');
       }
@@ -346,16 +363,19 @@ export class AttachmentService implements MediaHandler {
       // 文件名以 JSON 字面量嵌入注记（引号定界）——bidi/零宽已清洗，普通文本无法冒充结构（G6）
       if (att.kind === 'voice' || att.kind === 'video') {
         const dur = att.durationSeconds !== undefined ? `（时长 ${att.durationSeconds} 秒）` : '';
-        return { result: 'ok', note: `[附件 ${att.kind}] 已归档：\`${abs}\`${dur}\n- 内容不可解析：v1 无法读取语音/视频内容（仅归档）。` };
+        return { result: 'ok', note: `[附件 ${att.kind}] 已归档：\`${abs}\`${dur}\n- 大小：${bytes} 字节\n- 内容不可解析：v1 无法读取语音/视频内容（仅归档）。` };
       }
       return { result: 'ok', note: `[附件 ${att.kind}] 已下载：\`${abs}\`\n- 文件名：${JSON.stringify(`${display}.${ext}`)} · 大小：${bytes} 字节` };
     } catch (err) {
       if (fd !== null) { try { closeSync(fd); } catch (cErr) { this.opts.logger.warn('media', `fd 关闭失败 msgId=${m.msgId}: ${String(cErr)}`); } }
-      try { if (existsSync(tmp)) unlinkSync(tmp); } catch (cErr) {
+      try { if (tmp !== '' && existsSync(tmp)) unlinkSync(tmp); } catch (cErr) {
         this.opts.logger.warn('media', `半成品清理失败 msgId=${m.msgId}: ${String(cErr)}`); // 不静默（G7：无秘匿内容）
       }
       if (err instanceof MediaTerminalError) throw err;
       throw new MediaTerminalError(signal.aborted ? '操作超时' : '文件写入失败', signal.aborted ? 'deadline' : 'fs');
+    } finally {
+      // 未排空的响应体（含 dateDir/openSync/超限中止路径的失败）cancel——归还连接（F3）
+      if (!drained) { try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ } }
     }
   }
 
@@ -396,16 +416,25 @@ export class AttachmentService implements MediaHandler {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const dir = join(this.opts.uploadsDir, `${d.getFullYear()}-${mm}-${dd}`);
-    // 包含性防御：既有路径为 symlink（mkdirSync recursive 会跟随——下载可逃逸 uploads 树）→ 终态拒绝
+    // 新建路径：mkdir + 显式 chmod 0700（防 umask 削权——mode 参数会被 umask 掩码）
+    try {
+      mkdirSync(dir, { mode: 0o700 });
+      chmodSync(dir, 0o700);
+      return dir;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw err instanceof MediaTerminalError ? err : new MediaTerminalError('文件写入失败', 'fs');
+      }
+    }
+    // 既有路径：lstat 拒 symlink/非目录（mkdir recursive 会跟随——下载可逃逸 uploads 树）；
+    // mode 不强改（owner 权限尊重——预存在目录的 0700 校验残余已文档化于 decisions）
     try {
       const st = lstatSync(dir);
       if (!st.isDirectory()) throw new MediaTerminalError('日期目录被符号链接/异物占用', 'fs');
     } catch (err) {
       if (err instanceof MediaTerminalError) throw err;
-      // ENOENT → 正常创建路径；其余（EACCES 等）由 mkdirSync 抛出归入终态
+      throw new MediaTerminalError('文件写入失败', 'fs');
     }
-    // 仅创建时设权（0700，umask 022 下不变）；已存在不 re-chmod——不覆盖 owner 既有权限
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
   }
 
