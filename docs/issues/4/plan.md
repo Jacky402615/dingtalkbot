@@ -171,7 +171,7 @@ export class MediaClient {
 **Interfaces:**
 - Produces: `type AttachmentKind = 'image' | 'file' | 'voice' | 'video'`；`interface ParsedAttachment { kind: AttachmentKind; downloadCode: string; fileName?: string; durationSeconds?: number }`；`interface MediaParseResult { text: string | null; attachments: ParsedAttachment[]; skippedUnknown: number }`；`parseInboundMedia(m: InboundRobotMessage): MediaParseResult | null`；`sanitizeFileName(name: string): string`；`stripExt(name: string): string`；`extFromFileName(name: string): string`；`extForContentType(ct: string | null): string`；`detectImageFormat(head: Uint8Array): string | null`；`assertPublicHttpsUrl(raw: string): URL`（Task 3 消费）
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/attachments.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/attachments.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -266,8 +266,8 @@ test('URL 安全校验: 非 https/凭据/localhost/私网字面 IP 拒绝；公�
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/attachments.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/media/attachments.ts`（文件头 + 纯函数段）：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/attachments.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/media/attachments.ts`（文件头 + 纯函数段）：
 
 ```ts
 import type { InboundRobotMessage } from '../transport/types.js';
@@ -432,8 +432,8 @@ export function assertPublicHttpsUrl(raw: string): URL {
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/attachments.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/media/attachments.ts tests/unit/attachments.test.ts && git commit -m "feat(d4): 媒体纯函数层——载荷解析/文件名清洗/扩展名/魔数/URL 安全门"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/attachments.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/media/attachments.ts tests/unit/attachments.test.ts && git commit -m "feat(d4): 媒体纯函数层——载荷解析/文件名清洗/扩展名/魔数/URL 安全门"`
 
 ---
 
