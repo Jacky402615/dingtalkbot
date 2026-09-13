@@ -1132,7 +1132,7 @@ test('store: 损坏 JSON → warn + 新会话；0600；构造自建目录（评�
   - `renderQuestionList(p: AskUserQuestionPayload): string` —— 单题：问题 + 编号选项（`1. <label> — <description>`）+ 回复格式提示（multiSelect 加"可多选，逗号分隔如 1,3"）；多题：按题分组编号 + "多题时按顺序逗号回复（第 i 个数字答第 i 题）"；**任一题 multiSelect 时追加"多题+多选组合暂不支持编号作答，请直接用文字回复"**（评审修复：不可表示组合显式降级）。
   - `parseNumericReply(text, p): { kind: 'answer'; answerText: string } | { kind: 'help'; message: string }` —— 单题：非 multi 给多数字 → help；越界/0 → help；multiSelect 可多数字。多题：**若任一题 multiSelect → help（提示用文字回复）**；否则逗号个数须等于题数且各在范围，按题逐行 `[AskUserQuestion 应答]\n<question>: 已选 "<label>"`；其余 help（decisions D13 + 评审修订）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1199,11 +1199,11 @@ test('parseNumericReply: 多题按位映射；个数不匹配 help；任一 mult
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/question-bridge.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现**（纯函数直写：`stripLeadingMention = (t) => t.replace(/^@[^\s@]+\s+/, '')`；render/parse 按上述规则；多选 labels `"A"、"C"` 用 `、` 连接。）
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/question-bridge.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现**（纯函数直写：`stripLeadingMention = (t) => t.replace(/^@[^\s@]+\s+/, '')`；render/parse 按上述规则；多选 labels `"A"、"C"` 用 `、` 连接。）
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/question-bridge.test.ts` Expected: PASS（4 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/question-bridge.ts tests/unit/question-bridge.test.ts && git commit -m "feat(agent): question bridge — mention strip, numbered rendering, numeric reply parsing with multi-select degradation"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/question-bridge.test.ts` Expected: PASS（4 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/agent/question-bridge.ts tests/unit/question-bridge.test.ts && git commit -m "feat(agent): question bridge — mention strip, numbered rendering, numeric reply parsing with multi-select degradation"`
 
 ### Task 8: per-chat 有界串行队列 + 关停语义（src/agent/turn-queue.ts）
 
