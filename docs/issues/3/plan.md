@@ -37,7 +37,7 @@
 **Interfaces:**
 - Produces: `class MsgIdDedupe { constructor(cap?: number); reserve(msgId: string): boolean; release(msgId: string): void }`（Task 6 dispatch 消费）
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/dedupe.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/dedupe.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -66,8 +66,8 @@ test('dedupe: release 未见过的 id 为 no-op', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/dedupe.test.ts` Expected: FAIL（模块 `../../src/dedupe.js` 不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/dedupe.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/dedupe.test.ts` Expected: FAIL（模块 `../../src/dedupe.js` 不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/dedupe.ts`：
 
 ```ts
 // msgId 去重（D3 D10）：reserve = 同步 check+add，必须在任何 await 之前完成——
@@ -94,8 +94,8 @@ export class MsgIdDedupe {
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/dedupe.test.ts` Expected: PASS（3 tests）
-- [ ] **Step 5: Commit** — `git add src/dedupe.ts tests/unit/dedupe.test.ts && git commit -m "feat(d3): msgId 原子占位去重件 MsgIdDedupe"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/dedupe.test.ts` Expected: PASS（3 tests）
+- [x] **Step 5: Commit** — `git add src/dedupe.ts tests/unit/dedupe.test.ts && git commit -m "feat(d3): msgId 原子占位去重件 MsgIdDedupe"`
 
 ---
 
