@@ -270,3 +270,30 @@ test('handler: 首回合失败时已排队的第二条 → 全新会话（不对
   expect(seen[1].resume).toBe(false);                          // 排队对账：记录已作废 → 全新起
   expect(seen[1].sessionId).not.toBe(seen[0].sessionId);
 });
+
+// ---- code-review r2 修复回归 ----
+test('handler: 排队对账后的会话持久化不再复活幽灵 id（成功路径写对账 id）', async () => {
+  let release1!: () => void;
+  const seen: TurnRequest[] = [];
+  let call = 0;
+  const runner = {
+    run: async (req: TurnRequest): Promise<TurnResult> => {
+      call += 1;
+      seen.push(req);
+      if (call === 1) await new Promise<void>((r) => { release1 = r; });
+      if (call === 1) return { ok: false, outputText: '', errorText: 'claude 失败', durationMs: 1 };
+      return { ok: true, outputText: 'ok', errorText: '', durationMs: 1 };
+    },
+    killAll: async () => {},
+  } as unknown as ClaudeRunner;
+  const { handler, queue, store } = harness(runner);
+  await handler(msg({ msgId: 'y1' }));
+  await new Promise((r) => setTimeout(r, 10));
+  await handler(msg({ msgId: 'y2', textContent: '追问' }));
+  release1();
+  await queue.waitIdle('p2p:st1');
+  const stored = store.load('p2p:st1');
+  expect(stored).not.toBeNull();
+  expect(stored!.sessionId).toBe(seen[1].sessionId); // 盘面 = 对账后的新 id，不是幽灵 id
+  expect(stored!.sessionId).not.toBe(seen[0].sessionId);
+});

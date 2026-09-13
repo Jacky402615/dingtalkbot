@@ -26,7 +26,12 @@ export interface ClaudeRunnerOptions {
   killDelayMs?: number;
 }
 
-interface ActiveChild { pid: number; killGroup: (s: NodeJS.Signals) => void; abort: (reason: string) => void }
+interface ActiveChild {
+  pid: number;
+  killGroup: (s: NodeJS.Signals) => void;
+  abort: (reason: string) => void;
+  completion: Promise<void>; // 本回合 settle（含 TERM→KILL 升级收尾）
+}
 
 export class ClaudeRunner {
   private readonly active = new Set<ActiveChild>();
@@ -34,10 +39,15 @@ export class ClaudeRunner {
 
   constructor(private readonly opts: ClaudeRunnerOptions) {}
 
-  killAll(): void {
+  async killAll(): Promise<void> {
     this.closed = true; // 关停后拒绝新 run
-    for (const a of this.active) a.abort('runner 已关停（killAll）'); // TERM→KILL 升级 + 中止在飞 run
+    const waits: Array<Promise<void>> = [];
+    for (const a of this.active) {
+      a.abort('runner 已关停（killAll）'); // TERM→KILL 升级 + 中止在飞 run
+      waits.push(a.completion);
+    }
     this.active.clear();
+    await Promise.all(waits); // 升级收尾完成才返回——关停不再先于 SIGKILL 退出
   }
 
   async run(req: TurnRequest, cbs: TurnCallbacks): Promise<TurnResult> {
@@ -54,7 +64,6 @@ export class ClaudeRunner {
       let committedText = '';
       let inflightAuthoritative: string | null = null;
       let inflightPartial: string | null = null;
-      let partialFromCompleted = false; // 完整事件后续写的 delta（代表已完成内容，换域时要提交）
       let currentMsgId: string | null = null;
       let questionSeen = false;
       // 回调串行链：异步 onText 不乱序、settle 前排空；链空闲时首回调同步触发（事件即达）
@@ -84,6 +93,8 @@ export class ClaudeRunner {
       let forcedError: string | null = null; // 看门狗/killAll 已定性的失败——exit 事件不得改判成功
       const escalationTimers = new Set<ReturnType<typeof setTimeout>>();
       let entryRef: ActiveChild | null = null;
+      let markSettled: () => void = () => {};
+      const completion = new Promise<void>((r) => { markSettled = r; });
       const finish = (ok: boolean, errorText: string) => {
         if (settled) return;
         settled = true;
@@ -93,7 +104,10 @@ export class ClaudeRunner {
         escalationTimers.clear();
         if (entryRef !== null) this.active.delete(entryRef);
         const outputText = fullText();
-        void emitChain.then(() => resolve({ ok, outputText, errorText, durationMs: (this.opts.now ?? Date.now)() - started }));
+        void emitChain.then(() => {
+          resolve({ ok, outputText, errorText, durationMs: (this.opts.now ?? Date.now)() - started });
+          markSettled();
+        });
       };
       let child: ReturnType<typeof spawn>;
       try {
@@ -110,6 +124,7 @@ export class ClaudeRunner {
       const entry: ActiveChild = {
         pid: child.pid ?? 0,
         killGroup,
+        completion,
         abort: (reason: string) => {
           if (settled) return;
           forcedError = reason;
@@ -165,10 +180,9 @@ export class ClaudeRunner {
         if (ev?.type === 'assistant' && Array.isArray(ev.message?.content)) {
           const msgId = typeof ev.message.id === 'string' ? ev.message.id : null;
           // 域切换：id 变化；防御回退——id 缺失时每个 complete 事件即新消息。
-          // 换域提交 = 上一消息权威全文 + （若为完整事件后续写）携带 partial；
-          // 完整事件【前】的 delta 属即将到来的消息，由权威全文替换，不提交。
+          // 换域只提交上一消息的权威全文；in-flight partial 属即将到来的消息，由权威全文替换。
           if (msgId === null || currentMsgId === null || msgId !== currentMsgId) {
-            committedText += (inflightAuthoritative ?? '') + (partialFromCompleted ? inflightPartial ?? '' : '');
+            committedText += inflightAuthoritative ?? '';
           }
           currentMsgId = msgId;
           const authoritative: string[] = [];
@@ -177,7 +191,6 @@ export class ClaudeRunner {
           }
           inflightAuthoritative = authoritative.join(''); // 权威替换 partial；无 text 块亦重置为 ''（防旧消息文本被重复提交）
           inflightPartial = null;
-          partialFromCompleted = false;
           // 同消息保序：text 块按序流出；遇到问题 tool_use 后抑制（不补发快照——前置 text 已按序 enqueue）
           for (const block of ev.message.content as any[]) {
             if (block?.type === 'text' && !questionSeen) {
@@ -195,12 +208,12 @@ export class ClaudeRunner {
         }
         if (ev?.type === 'stream_event' && ev.event?.type === 'content_block_delta'
           && ev.event.delta?.type === 'text_delta' && typeof ev.event.delta.text === 'string') {
+          // 完整事件之后到达的 delta = 下一消息的起点：先提交上一消息权威全文，partial 从零累计
           if (inflightAuthoritative !== null) {
-            // 完整事件后续写：并入 partial 并标记携带（换域时随提交，不被下一权威替换丢失）
-            partialFromCompleted = true;
+            committedText += inflightAuthoritative;
+            inflightAuthoritative = null;
           }
-          inflightPartial = (inflightAuthoritative ?? inflightPartial ?? '') + ev.event.delta.text;
-          inflightAuthoritative = null;
+          inflightPartial = (inflightPartial ?? '') + ev.event.delta.text;
           if (!questionSeen) {
             const snapshot = fullText();
             enqueueEmit(() => cbs.onText?.(snapshot));

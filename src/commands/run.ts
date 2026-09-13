@@ -58,8 +58,8 @@ export async function runCommand(
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('run', `收到 ${signal}，关停中`);
-    effectiveQueue.close();    // 拒新 + 丢弃排队回合（关停后不再 spawn）
-    effectiveRunner.killAll(); // detached 子进程组不随父退出——显式杀在飞回合
+    effectiveQueue.close();         // 拒新 + 丢弃排队回合（关停后不再 spawn）
+    await effectiveRunner.killAll(); // detached 子进程组不随父退出——TERM→KILL 升级收尾完成才继续
     await gateway.stop();
     if (!clearPidFile(paths.pidFile)) logger.warn('run', `pidfile 清理失败: ${paths.pidFile}`);
     logger.info('run', '已退出');
@@ -75,7 +75,7 @@ export async function runCommand(
   } catch (err) {
     logger.error('run', `启动失败: ${String(err)}`);
     effectiveQueue.close();
-    effectiveRunner.killAll();
+    await effectiveRunner.killAll();
     if (!clearPidFile(paths.pidFile)) logger.warn('run', `pidfile 清理失败: ${paths.pidFile}`);
     throw err; // cli 层转非零退出（AC1）
   }

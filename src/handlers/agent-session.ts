@@ -95,15 +95,16 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       }
 
       // 盘面会话对账（code-review 修复）：排队期间会话可能已被作废（首回合失败 delete）
-      // 或换代（TTL 过期被后续消息重置）——到达时快照不得对幽灵 sessionId 发 --resume。
-      let sessionId = record.sessionId;
+      // 或换代（TTL 过期被后续消息重置）——到达时快照不得对幽灵 sessionId 发 --resume，
+      // 且后续一切持久化都用对账后的 effectiveRecord（不得复活幽灵 id / 倒写换代 id）。
+      let effectiveRecord: SessionRecord = { ...record };
       let effectiveResume = resume;
       if (fresh === null) {
-        sessionId = randomUUID();
+        effectiveRecord = { chatKey, sessionId: randomUUID(), lastActiveAt: record.lastActiveAt };
         effectiveResume = false;
         deps.logger.warn('session', `chat=${chatKey} 排队期间会话记录已作废，全新会话起`);
       } else if (fresh.sessionId !== record.sessionId) {
-        sessionId = fresh.sessionId;
+        effectiveRecord = { ...fresh, lastActiveAt: Math.max(fresh.lastActiveAt, record.lastActiveAt) };
         effectiveResume = true;
         deps.logger.warn('session', `chat=${chatKey} 排队期间会话已换代，跟随盘面 sessionId`);
       }
@@ -116,11 +117,11 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       let pending: AskUserQuestionPayload | null = null;
       let preQuestionText = '';
       let lastText = '';
-      const recordToPersist: SessionRecord = { ...record };
+      const recordToPersist: SessionRecord = { ...effectiveRecord };
       try {
         await bridge.start();
         const result = await deps.runner.run(
-          { prompt: effectivePrompt, sessionId, resume: effectiveResume, cwd: deps.workspace },
+          { prompt: effectivePrompt, sessionId: effectiveRecord.sessionId, resume: effectiveResume, cwd: deps.workspace },
           {
             onText: (t) => { lastText = t; return bridge.pushText(t); },
             onQuestion: (p) => {
@@ -135,8 +136,8 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
           await bridge.fail(result.errorText, result.outputText);
           // 失败：pending 回退到盘面真值（本轮新题不成立；旧题保留可继续应答）
           recordToPersist.pendingQuestion = fresh?.pendingQuestion;
-          if (!resume) {
-            deps.store.delete(chatKey); // 首回合失败：作废幽灵会话记录，下条消息全新起
+          if (!effectiveResume) {
+            deps.store.delete(chatKey); // 本回合即全新会话且失败：作废记录，下条消息全新起
           } else {
             deps.store.persist(recordToPersist);
           }
@@ -158,7 +159,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
         // 回合内异常：卡收终不悬挂，盘面回退真值后 rethrow（队列记日志）
         await bridge.fail(String(err), lastText);
         recordToPersist.pendingQuestion = fresh?.pendingQuestion;
-        if (!resume) deps.store.delete(chatKey);
+        if (!effectiveResume) deps.store.delete(chatKey);
         else deps.store.persist(recordToPersist);
         throw err;
       }

@@ -276,3 +276,28 @@ test('runner: killAll 中止在飞回合（TERM→KILL + 按关停定性）', as
   const after = await r.run({ prompt: 'y', sessionId: 'u', resume: false, cwd: '/ws' }, {});
   expect(after.ok).toBe(false); // 关停后拒新
 });
+
+// ---- code-review r2 修复回归 ----
+test('runner: complete→delta→complete（真实 delta 时序）不重复上一消息', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child);
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: 'A' }]));            // 消息 1 完成
+  child.write({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'δ' } } }); // 消息 2 的 delta
+  child.write(assistantMsg('m2', [{ type: 'text', text: 'B' }]));            // 消息 2 完成
+  child.write({ type: 'result', subtype: 'success' }); child.closeStdout(); child.exitWith(0);
+  const res = await p;
+  expect(res.outputText).toBe('AB'); // 不出现 'Aδ' 提交或 A 重复
+});
+
+test('runner: killAll 等待升级收尾——await 返回时回合已 settle 且 KILL 已发（TERM 被忽略场景）', async () => {
+  const child = makeFakeChild();
+  const r = makeRunner(child); // killFn 只记录不真杀（模拟子进程忽略 TERM）
+  const p = r.run({ prompt: 'x', sessionId: 'u', resume: false, cwd: '/ws' }, {});
+  child.write(assistantMsg('m1', [{ type: 'text', text: '跑到一半' }]));
+  await r.killAll();
+  const res = await p;
+  expect(res.ok).toBe(false);
+  expect(res.errorText).toContain('killAll');
+  expect(child.killed).toContain('SIGKILL-4321');
+});
