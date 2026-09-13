@@ -16,7 +16,30 @@
 - token：`POST /v1.0/oauth2/accessToken`；内存+`.bot/token.json`（0600 原子写，按 clientId+clientSecret 凭据指纹隔离——任一凭据轮换旧缓存即失效；缓存权限非 0600 或不可解析均告警忽略）双缓存；到期前 5 分钟刷新；并发 single-flight（CI-verified）。expireIn 单位歧义由归一化处理并在 smoke 实测（live-verified 待回填）。
 - 请求时限：token 与回复请求各 10s deadline（覆盖 fetch + body 读取）；handler 全部尝试（token+回复+重试延迟）另受 50s 总预算约束，压在钉钉 60s 重推窗口内（CI-verified）。
 - p2p 回复：`POST /v1.0/robot/oToMessages/batchSend`，`userIds=[senderStaffId]`；群回复：`POST /v1.0/robot/groupMessages/send`，`openConversationId=入站 conversationId`（live-verified 待回填）；msgKey `sampleMarkdown`，msgParam `{title,text}`（CI-verified：载荷形状）。
-- echo 行为：文本按字节原样回显（title `dingtalkbot`）；群消息不剥 @ 前缀（群策略是 D3）；非文本/空文本丢弃并留 warn 日志。
+- echo 行为（D1，已被 D2 取代）：D2 起 echo handler 移除，消息进入 agent 会话层（见 Session/Agent 与 AI 卡回复两节）；非文本/空文本丢弃并留 warn 日志的规则保留。
+
+## Session / Agent（D2 契约）
+
+- 会话键控：p2p 按 `senderStaffId`、群按 `conversationId` 每 chat 一个会话；存储 `.bot/sessions/<sha256(chatKey) 前 16 hex>.json`（0600 原子写，损坏当作不存在开新会话）（CI-verified）。
+- idle-TTL resume：TTL 判定与 lastActiveAt 更新都在**消息到达时**（排队等待不计入）；默认 60 分钟（`session_idle_ttl_minutes`）；TTL 内 `--resume <sessionId>` 续会话，超 TTL 新 uuid（CI-verified）。持久化与盘面合并（lastActiveAt 取 max，旧在飞回合不倒拨 TTL）；网关重启后跨实例恢复会话（CI-verified）。
+- 回合执行：`claude -p <prompt> [--session-id|--resume] --output-format stream-json --verbose --include-partial-messages --model <cfg> --permission-mode <cfg>`，cwd=网关工作区根、env 全量继承（加载该目录身份/hooks——feishubot 同模型）；prompt 前缀 `[Context: sender=…, staffId=…, chat=… (p2p|group)]`（CI-verified：旗标/载荷）。
+- 流解析：assistant 消息按 `message.id` 分域（id 缺失防御回退：每个 assistant 事件即新域）；delta 累计与 message 级权威全文分离（权威替换不提交）；首个 `AskUserQuestion` tool_use 前的文本照常流出、其后抑制（headless 下该工具恒被 CLI 自动拒绝——2026-09-13 实测，问题经回合边界协议回传）；回调异步串行化、settle 前排空（CI-verified）。
+- 进程监督：子进程 detached 进程组；回合看门狗 `agent_turn_timeout_ms`（默认 600s）超时组 SIGTERM→5s→SIGKILL；`killAll` 同升级且置 closed 拒新回合；关停序 `queue.close → runner.killAll → gateway.stop`（排队未开始回合丢弃，关停后不再 spawn）（CI-verified）。
+- 消息入口：msgId LRU 去重（500）；群消息剥一次前导 `@token`（窄正则 `^@[^\s@]+\s+`，其余 @ 不动——群策略主体在 D3）；非文本/空文本/未知会话类型 warn 丢弃；队列满（`queue_max_per_chat` 默认 10）拒绝并回一条忙线 markdown（CI-verified）。
+- 会话失效：首回合失败（`!ok && !resume`）作废会话记录（防幽灵 sessionId 被 --resume 连环失败）；回合失败时 pendingQuestion 回退盘面真值（CI-verified）。
+
+## AI 卡回复（D2 契约）
+
+- 开卡：回合开始 `POST /v1.0/card/instances/createAndDeliver`——`cardTemplateId`（config `ai_card_template_id`，owner 在钉钉卡片平台创建；空 → 启动 warn + 纯 markdown 模式）、`outTrackId`=uuid、`cardData.cardParamMap[<card_content_key>]`（默认 `content`）、`callbackType:'STREAM'`、投放路由 群 `dtv1.card//IM_GROUP.<conversationId>`+`imGroupOpenDeliverModel{robotCode}` / p2p `dtv1.card//IM_ROBOT.<senderStaffId>`+`imRobotOpenDeliverModel{spaceType:'IM_ROBOT'}`（CI-verified：载荷形状；live-verified 待回填）。
+- 流式更新：`PUT /v1.0/card/streaming`——`{outTrackId, guid(每次唯一), key, content:全量累计, isFull:true, isFinalize, isError}`；`isFinalize` 收终自动转 finished 态（live-verified 待回填）。**双阈值节流**：距上次刷新 ≥ `card_stream_min_interval_ms`（默认 1500）且新增字节（UTF-8）≥ `card_stream_min_bytes`（默认 64）才刷；finalize 恒全量兜底；每次 flush 落 info 日志 `bytes/delta/intervalMs/suppressed`（AC6 可观察，配额保护；默认值 live 校准项）（CI-verified）。
+- 回退链（AC4）：任何卡失败（创建/流式/收终）⇒ **恰好一条** markdown 全文（title `dingtalkbot`，p2p batchSend / 群 groupMessages/send）；流式失败后尽力一次 isError 收终（半成品卡可见终止态）；claude 失败且卡已 dead ⇒ markdown 含错误与部分文本；回退自身失败 error 日志（通道穷尽）（CI-verified）。
+- 内容上限：卡片/流式内容累计 30000 字符截断（一次性 warn）。
+- AskUserQuestion 降级（AC5）：卡内渲染编号选项列表（单题/多题分组）；纯数字回复解析为结构化应答（`[AskUserQuestion 应答] <question>: 已选 "<label>"`）经 resume 回传；单题多选支持 `1,3`；多题按位逗号映射；多题+多选组合降级提示文字回复；越界/个数不符回 help 文本不进模型；pending 即时落盘（回合仍在飞时可应答），应答成功且目标匹配才清除（CI-verified）。
+
+## 配置（D2 契约）
+
+- `.bot/config.json` 键（非法值 warn + 默认）：`session_idle_ttl_minutes`(60) · `ai_card_template_id`("") · `card_content_key`("content") · `model`("glm-5.3-flash") · `agent_permission_mode`("bypassPermissions"|"acceptEdits") · `agent_turn_timeout_ms`(600000) · `claude_bin`("claude") · `card_stream_min_interval_ms`(1500) · `card_stream_min_bytes`(64) · `queue_max_per_chat`(10)（CI-verified）。
+- bypassPermissions 启动响亮 warn：D3 访问控制落地前，机器人应用可见范围必须受控（FLAGGED-FOR-HUMAN，见 docs/issues/2/decisions.md）。
 
 ## CLI（D1 契约）
 
