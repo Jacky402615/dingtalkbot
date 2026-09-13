@@ -585,7 +585,7 @@ export function createAccessLoader(file: string, logger?: Logger, readFile: Read
 
 **Files:**
 - Create: `src/handlers/commands.ts`
-- Test: `tests/unit/commands.test.ts`
+- Test: `tests/unit/gateway-commands.test.ts`（执行轮更名：`commands.test.ts` 与 D1 的 CLI 命令测试撞名，D1 文件保留不动）
 
 **Interfaces:**
 - Consumes: `SessionStore.reset/list`（Task 2）、`ClaudeRunner.abortChat/activeCountOf`（Task 3）、`TurnQueue.depthOf`（**既有 API**，`src/agent/turn-queue.ts:17`——codex round1 finding 1 经核实为误报，接口已存在，无需新增）、`RobotReplyer.sendOtoMarkdown/sendGroupMarkdown`、`ConnectionStateSnapshot`（state.ts）
@@ -606,7 +606,7 @@ export interface CommandDeps {
 }
 ```
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/commands.test.ts`（自足 fakes）：
+- [x] **Step 1: Write the failing test** — `tests/unit/commands.test.ts`（自足 fakes）：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -739,8 +739,8 @@ test('/status: p2p 含连接/会话哈希明细/名单；群内仅概览+计数�
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/commands.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/handlers/commands.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/commands.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/handlers/commands.ts`：
 
 ```ts
 import type { InboundRobotMessage } from '../transport/types.js';
@@ -880,8 +880,8 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
 
 （拒绝文案属 dispatch 层（鉴权），本文件不定义——见 Task 6 `REJECT_TEXT`。）
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/commands.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/handlers/commands.ts tests/unit/commands.test.ts && git commit -m "feat(d3): /new /stop /status /help 四命令（哈希明细、stop 诚实超时、队列披露）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/commands.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/handlers/commands.ts tests/unit/commands.test.ts && git commit -m "feat(d3): /new /stop /status /help 四命令（哈希明细、stop 诚实超时、队列披露）"`
 
 ---
 
