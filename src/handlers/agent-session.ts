@@ -100,7 +100,8 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       let effectiveRecord: SessionRecord = { ...record };
       let effectiveResume = resume;
       if (fresh === null) {
-        effectiveRecord = { chatKey, sessionId: randomUUID(), lastActiveAt: record.lastActiveAt };
+        // 继承到达时代（D3 G3）：若到达后发生过 /new，此记录按陈旧代跳过持久化
+        effectiveRecord = { chatKey, sessionId: randomUUID(), epoch: record.epoch, lastActiveAt: record.lastActiveAt };
         effectiveResume = false;
         deps.logger.warn('session', `chat=${chatKey} 排队期间会话记录已作废，全新会话起`);
       } else if (fresh.sessionId !== record.sessionId) {

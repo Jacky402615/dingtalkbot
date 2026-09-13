@@ -325,3 +325,27 @@ test('handler: help 直发失败 → msgId 未记去重，adapter 重试可重�
   expect(attempts.length).toBe(2);
   expect(attempts[1]).toContain('编号');
 });
+
+// ---- D3（issue #3）：/new 竞态（G3 对账路径） ----
+test('D3 /new 竞态: 在飞与排队消息跨 reset——旧 id 不复活、后续全新会话（G3 对账路径）', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const { calls, runner } = fakeRunner([
+    async () => { await gate; },   // A：在飞挂起
+    async () => {},                // B：reset 前到达、reset 后开跑
+    async () => {},                // C：reset 后的新消息
+  ]);
+  const h = harness(runner);
+  await h.handler(msg({ msgId: 'a1', textContent: '长回合' }));       // A 入队即开跑（挂起）
+  await h.handler(msg({ msgId: 'b1', textContent: '排队消息' }));     // B 到达（排队，arrival epoch=0）
+  await new Promise((r) => setTimeout(r, 20));                        // 等 A job 开始（fresh 对账已过）
+  h.store.reset('p2p:st1');                                          // /new：epoch=1，文件删除
+  release();                                                         // A 完成 → persist 陈旧跳过
+  await h.queue.waitIdle('p2p:st1');                                 // A、B 都收尾
+  expect(h.store.load('p2p:st1')).toBeNull();                        // A 与 B 的 persist 均被墓碑拦截
+  expect(calls[1]!.req.sessionId).not.toBe(calls[0]!.req.sessionId); // B 对账后新 sessionId（不复用 A 的）
+  await h.handler(msg({ msgId: 'c1', textContent: '新开始' }));       // C：reset 后全新
+  await h.queue.waitIdle('p2p:st1');
+  expect(calls[2]!.req.resume).toBe(false);
+  expect(h.store.load('p2p:st1')!.sessionId).toBe(calls[2]!.req.sessionId); // C 正常落盘
+});

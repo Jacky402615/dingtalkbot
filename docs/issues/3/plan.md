@@ -109,7 +109,7 @@ export class MsgIdDedupe {
 **Interfaces:**
 - Produces: `SessionRecord.epoch?: number`；`SessionStore.reset(chatKey: string): void`；`SessionStore.list(): Array<{ chatKey: string; chatKeyHash: string; sessionId: string; lastActiveAt: number; pending: boolean }>`（Task 5 commands 消费；chatKeyHash = 文件名 16hex，/status 只渲染哈希——G6）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/unit/session-store.test.ts`：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/unit/session-store.test.ts`：
 
 ```ts
 test('store D3: reset 后旧在飞回合 persist 不复活（epoch 代际，G3）', () => {
@@ -184,8 +184,8 @@ test('store D3: 跨重启复活防线——磁盘 epoch 大于内存代时 load 
 
 （文件头 import 增加 `createHash`：`import { createHash } from 'node:crypto';`）
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/session-store.test.ts` Expected: FAIL（`store.reset`/`store.list` 不是函数）
-- [ ] **Step 3: Write the minimal implementation** — `src/agent/session-store.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/session-store.test.ts` Expected: FAIL（`store.reset`/`store.list` 不是函数）
+- [x] **Step 3: Write the minimal implementation** — `src/agent/session-store.ts`：
 
 ```ts
 // imports 增加 readdirSync：
@@ -291,8 +291,8 @@ test('D3 /new 竞态: 在飞与排队消息跨 reset——旧 id 不复活、后
 });
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/session-store.test.ts tests/unit/agent-session.test.ts` Expected: PASS（既有用例不回归）
-- [ ] **Step 5: Commit** — `git add src/agent/session-store.ts src/handlers/agent-session.ts tests/unit/session-store.test.ts tests/unit/agent-session.test.ts && git commit -m "feat(d3): SessionStore epoch 代际墓碑（load 重盖章防跨重启复活）与 list() 哈希枚举"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/session-store.test.ts tests/unit/agent-session.test.ts` Expected: PASS（既有用例不回归）
+- [x] **Step 5: Commit** — `git add src/agent/session-store.ts src/handlers/agent-session.ts tests/unit/session-store.test.ts tests/unit/agent-session.test.ts && git commit -m "feat(d3): SessionStore epoch 代际墓碑（load 重盖章防跨重启复活）与 list() 哈希枚举"`
 
 ---
 

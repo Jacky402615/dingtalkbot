@@ -91,3 +91,75 @@ test('store: 损坏 JSON → warn + 新会话；0600；构造自建目录（评�
   store.endTurn(next.record);
   expect(statSync(join(dir, file)).mode & 0o777).toBe(0o600);
 });
+
+// ---- D3（issue #3）：epoch 代际 / reset / list ----
+import { createHash } from 'node:crypto';
+
+test('store D3: reset 后旧在飞回合 persist 不复活（epoch 代际，G3）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3a-'));
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000 });
+  const { record } = store.beginTurn('p2p:st1');   // 在飞回合到达快照 epoch=0
+  store.reset('p2p:st1');                           // /new → epoch=1，文件删除留痕
+  expect(store.load('p2p:st1')).toBeNull();
+  store.persist(record);                            // 在飞回合结束落盘 → 陈旧代际跳过
+  expect(store.load('p2p:st1')).toBeNull();         // 旧 sessionId 不复活
+  const next = store.beginTurn('p2p:st1');          // /new 后的新消息
+  expect(next.resume).toBe(false);
+  store.persist(next.record);
+  expect(store.load('p2p:st1')!.sessionId).toBe(next.record.sessionId); // 新代正常落盘
+});
+
+test('store D3: reset 不牵连其他 chat；多次 reset 代际单调；无既有会话 reset 幂等', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3b-'));
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000 });
+  const a = store.beginTurn('p2p:a').record;
+  store.beginTurn('p2p:b');
+  store.reset('p2p:a');
+  store.reset('p2p:a');                             // epoch=2
+  store.persist(a);                                 // epoch 0 < 2 → 跳过
+  expect(store.load('p2p:a')).toBeNull();
+  expect(store.load('p2p:b')).not.toBeNull();
+  expect(() => store.reset('p2p:none')).not.toThrow(); // 无会话 reset 无害
+  expect(store.load('p2p:none')).toBeNull();
+});
+
+test('store D3: list() 按 lastActiveAt 降序、chatKeyHash=文件名 16hex、pending 标记、坏文件聚合计数跳过', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3c-'));
+  let clock = 1_000_000;
+  const warns: string[] = [];
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000, now: () => clock,
+    logger: { debug() {}, info() {}, warn: (_s, m) => warns.push(m), error() {} } });
+  store.beginTurn('p2p:x');
+  clock += 60_000;
+  const y = store.beginTurn('group:y').record;
+  y.pendingQuestion = Q;
+  store.persist(y);
+  writeFileSync(join(dir, 'badfile.json'), '{not-json'); // 坏文件
+  const hashOf = (chatKey: string): string =>
+    createHash('sha256').update(chatKey).digest('hex').slice(0, 16);
+  let list = store.list();
+  expect(list).toHaveLength(2);
+  expect(list[0]!.chatKey).toBe('group:y');          // 更晚活跃在前
+  expect(list[0]!.chatKeyHash).toBe(hashOf('group:y'));
+  expect(list[0]!.pending).toBe(true);
+  expect(list[1]!.pending).toBe(false);
+  expect(warns.some((w) => w.includes('跳过 1 个'))).toBe(true);
+  clock += 60_000;
+  store.beginTurn('p2p:x');                          // touch 后 x 重新排前
+  list = store.list();
+  expect(list[0]!.chatKey).toBe('p2p:x');
+});
+
+test('store D3: 跨重启复活防线——磁盘 epoch 大于内存代时 load 重盖章，reset 后陈旧 persist 仍被拦截（r3 评审修复回归）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3d-'));
+  // 模拟"重启前 reset 过 5 次"的盘面：手工种入高 epoch 记录
+  const seed = { chatKey: 'p2p:st1', sessionId: 'old-uuid', lastActiveAt: Date.now(), epoch: 5 };
+  writeFileSync(join(dir, `${createHash('sha256').update('p2p:st1').digest('hex').slice(0, 16)}.json`), JSON.stringify(seed));
+  const s2 = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000 }); // "重启"：内存代归零
+  const snap = s2.load('p2p:st1');                    // 真实流程的取值点：重盖章为当前代 0
+  expect(snap!.sessionId).toBe('old-uuid');
+  expect(snap!.epoch).toBe(0);                        // 若不重盖章，此处为 5 → 后续判陈旧恒 false
+  s2.reset('p2p:st1');                                // /new → 内存代 1，文件删除
+  s2.persist(snap);                                   // 在飞/排队回合持取值快照落盘（epoch 0 < 1）
+  expect(s2.load('p2p:st1')).toBeNull();              // 拦截——旧 sessionId 不复活
+});
