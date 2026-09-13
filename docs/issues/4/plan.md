@@ -447,7 +447,7 @@ export function assertPublicHttpsUrl(raw: string): URL {
 - Consumes: `parseInboundMedia` / `sanitizeFileName` / `extFromFileName` / `extForContentType` / `detectImageFormat` / `assertPublicHttpsUrl`（Task 2）；`MediaClient.exchangeDownloadUrl`（Task 1，经 `MediaExchangeClient` 结构契约注入）
 - Produces: `interface MediaExchangeClient { exchangeDownloadUrl(robotCode: string, downloadCode: string, signal?: AbortSignal): Promise<string> }`；`type MediaOutcome = { kind: 'ok'; text: string | null; notes: string[] } | { kind: 'error'; errorText: string }`；`interface MediaHandler { handle(m: InboundRobotMessage): Promise<MediaOutcome | null> }`；`class AttachmentService implements MediaHandler`（Task 6/7 消费）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/unit/attachments.test.ts`：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/unit/attachments.test.ts`：
 
 ```ts
 import { mkdtempSync, mkdirSync, readdirSync, statSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
@@ -687,8 +687,8 @@ test('service: file 附件（AC2）——显示名剥扩展防 .zip.zip；fileNa
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/attachments.test.ts` Expected: FAIL（`AttachmentService` 未导出）
-- [ ] **Step 3: Write the minimal implementation** — `src/media/attachments.ts` 追加：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/attachments.test.ts` Expected: FAIL（`AttachmentService` 未导出）
+- [x] **Step 3: Write the minimal implementation** — `src/media/attachments.ts` 追加：
 
 ```ts
 import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeSync } from 'node:fs';
@@ -950,8 +950,8 @@ function exchangeError(err: unknown): MediaTerminalError {
 function safeUrlReason(err: unknown): string { return String((err as Error)?.message ?? err); }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/attachments.test.ts` Expected: PASS（纯函数 + 服务用例全绿；既有用例不回归）
-- [ ] **Step 5: Commit** — `git add src/media/attachments.ts tests/unit/attachments.test.ts && git commit -m "feat(d4): AttachmentService——30s deadline/安全下载/预算降级/原子发布/脱敏日志（AC1-AC4 面）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/attachments.test.ts` Expected: PASS（纯函数 + 服务用例全绿；既有用例不回归）
+- [x] **Step 5: Commit** — `git add src/media/attachments.ts tests/unit/attachments.test.ts && git commit -m "feat(d4): AttachmentService——30s deadline/安全下载/预算降级/原子发布/脱敏日志（AC1-AC4 面）"`
 
 **Checkpoint A（Task 1–3 完成后）**：`bun install && bun test tests/unit/media-client.test.ts tests/unit/attachments.test.ts` 全绿——下载编排核心（最高风险件）先行验证。
 

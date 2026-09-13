@@ -15,7 +15,7 @@ function makeClient(fetchFn: typeof fetch, calls: Array<{ url: string; init: Req
 
 test('media-client: 交换请求形状——POST /v1.0/robot/messageFiles/download，token header，body {downloadCode, robotCode}；返回 downloadUrl', async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
-  const c = makeClient(async () => new Response(JSON.stringify({ downloadUrl: 'https://cdn.test/a.png' }), { status: 200 }), calls);
+  const c = makeClient((async () => new Response(JSON.stringify({ downloadUrl: 'https://cdn.test/a.png' }), { status: 200 })) as unknown as typeof fetch, calls);
   const url = await c.exchangeDownloadUrl('rc-1', 'dc-1');
   expect(url).toBe('https://cdn.test/a.png');
   expect(calls[0]!.url).toBe('https://api.test/v1.0/robot/messageFiles/download');
@@ -34,7 +34,7 @@ test('media-client: HTTP 错误抛错只含状态码（G7 不读不记响应体�
   await expect(c1.exchangeDownloadUrl('rc', 'dc-bad')).rejects.toThrow('HTTP 400');
   expect(errs.join('\n')).not.toContain('不存在或已过期');   // 错误体不进日志
   expect(errs.join('\n')).not.toContain('dc-bad');          // downloadCode 不进日志
-  const c2 = makeClient(async () => new Response('{}', { status: 200 }), []);
+  const c2 = makeClient((async () => new Response('{}', { status: 200 })) as unknown as typeof fetch, []);
   await expect(c2.exchangeDownloadUrl('rc', 'dc')).rejects.toThrow('downloadUrl');
 });
 
