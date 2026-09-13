@@ -182,7 +182,7 @@ test('store D3: 作废三级兜底——rename 失败原地覆写；双失败才
   const errs: string[] = [];
   const store2 = new SessionStore({ sessionsDir: dir2, ttlMs: 3_600_000,
     logger: { debug() {}, info() {}, warn() {}, error: (_s, m) => errs.push(m) } });
-  store2.beginTurn('p2p:st2');
+  const ghost = store2.beginTurn('p2p:st2').record.sessionId; // 磁盘残留的 sessionId
   const file2 = readdirSync(dir2).find((f) => f.endsWith('.json'))!;
   chmodSync(dir2, 0o555);
   chmodSync(join(dir2, file2), 0o444);
@@ -190,8 +190,16 @@ test('store D3: 作废三级兜底——rename 失败原地覆写；双失败才
     expect(() => store2.reset('p2p:st2')).toThrow();
     expect(() => store2.delete('p2p:st2')).not.toThrow(); // delete 不抛（error 日志留痕）
     expect(errs.some((e) => e.includes('作废失败'))).toBe(true);
+    // r3：双失败后内存兜底墓碑——已知幽灵 sessionId 拒 resume（下条消息全新会话）
+    const next = store2.beginTurn('p2p:st2');
+    expect(next.resume).toBe(false);
+    expect(next.record.sessionId).not.toBe(ghost);         // 全新 id——墓碑拒绝 resume 磁盘残留
   } finally {
     chmodSync(join(dir2, file2), 0o600);
     chmodSync(dir2, 0o755);
   }
+  // 恢复可写后新记录成功落盘 → 墓碑退役，正常 resume 恢复
+  store2.persist(store2.beginTurn('p2p:st2').record);
+  const again = store2.beginTurn('p2p:st2');
+  expect(again.resume).toBe(true);
 });

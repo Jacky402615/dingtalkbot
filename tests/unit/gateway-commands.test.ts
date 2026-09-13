@@ -109,8 +109,8 @@ test('/stop: 回合启动窗口（job 在飞、runner 未注册）——如实�
   const exec = createCommandExecutor(deps as never);
   await exec('stop', msg());
   expect(md).toHaveLength(1);
-  expect(md[0]!.text).toContain('正在启动');
-  expect(md[0]!.text).not.toContain('无在飞回合');
+  expect(md[0]!.text).toContain('正在启动或收尾');      // 双窗口单一诚实文案（r3）
+  expect(md[0]!.text).not.toContain('当前无在飞回合');
   expect(aborts).toHaveLength(0);                      // 不盲发 abort
 });
 

@@ -105,9 +105,12 @@ export function createCommandExecutor(deps: CommandDeps): (name: CommandName, m:
     if (deps.runner.activeCountOf(chatKey) === 0) {
       const depth0 = deps.queue.queuedDepthOf(chatKey);
       if (deps.queue.runningCountOf(chatKey) > 0) {
-        // job 在飞但 runner 尚未注册（bridge.start → spawn 窗口）——如实告知，不误报"无在飞"
-        deps.logger.info('cmd', `chat=${chatKey} /stop 落在回合启动窗口（job 在飞、runner 未注册）`);
-        await sendChatMarkdown(deps.replyer, m, '回合正在启动中，暂无法中止；请稍后再次发送 /stop。');
+        // job 在飞但 runner 未注册——可能是启动窗口（bridge.start→spawn），也可能是
+        // 收尾窗口（runner 已 settle、桥仍在收终）。单一诚实文案覆盖两态，不误报"无在飞"。
+        deps.logger.info('cmd', `chat=${chatKey} /stop 落在回合启动/收尾窗口（job 在飞、runner 无注册）`);
+        await sendChatMarkdown(deps.replyer, m, depth0 > 0
+          ? `当前没有可中止的运行回合（正在启动或收尾）；队列中仍有 ${depth0} 条排队消息。若回合仍在生成，请稍后再次发送 /stop。`
+          : '当前没有可中止的运行回合（正在启动或收尾）。若回合仍在生成，请稍后再次发送 /stop。');
         return;
       }
       await sendChatMarkdown(deps.replyer, m, depth0 > 0
