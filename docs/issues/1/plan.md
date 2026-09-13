@@ -233,7 +233,7 @@ export function saveBotEnv(botDir: string, env: DingtalkEnv): void {
 **Interfaces:**
 - Produces: `WorkspacePaths`（botDir/logsDir/sessionsDir/uploadsDir/pidsDir/envFile/configFile/accessFile/stateFile/tokenCacheFile/pidFile）；`resolveWorkspace(explicit?)`；`bootstrapWorkspace(workspace)`（建目录树 + 幂等写默认 config.json/access.json，0600）；`loadConfig(paths)`（损坏→stderr 警告 + 空配置，不抛）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/config.test.ts
@@ -269,9 +269,9 @@ test('loadConfig: 损坏 JSON 警告并回退空对象（不抛）', () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL — `Cannot find module '../../src/config.js'`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/config.test.ts` Expected: FAIL — `Cannot find module '../../src/config.js'`。
 
-- [ ] **Step 3: 实现** `src/config.ts`
+- [x] **Step 3: 实现** `src/config.ts`
 
 ```ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -321,9 +321,9 @@ export function loadConfig(paths: WorkspacePaths): BotConfig {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/config.test.ts` Expected: PASS（3 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/config.test.ts` Expected: PASS（3 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(config): .bot/ workspace bootstrap with idempotent defaults"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/config.ts tests/unit/config.test.ts && git commit -m "feat(config): .bot/ workspace bootstrap with idempotent defaults"`
 
 ### Task 4: JSONL 日志器（src/logger.ts）
 
