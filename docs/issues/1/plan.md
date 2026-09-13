@@ -125,7 +125,7 @@ test('scaffold: 包身份与依赖 pin 正确', () => {
 **Interfaces:**
 - Produces: `EnvError`；`parseEnvFile(text): Record<string,string>`；`loadBotEnv(botDir): DingtalkEnv`（缺文件/缺键抛 `EnvError`，响亮）；`saveBotEnv(botDir, env)`（0600）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/env.test.ts
@@ -158,18 +158,18 @@ test('saveBotEnv + loadBotEnv 往返，权限 0600（含覆写 planted 0644 文�
   saveBotEnv(dir, { clientId: 'cid', clientSecret: 'sec' });
   const text = readFileSync(join(dir, '.env'), 'utf8');
   expect(text).toContain('DINGTALK_CLIENT_ID=cid');
-  expect((statSync(join(dir, '.env')).mode & 0o777) & 0o077).toBe(0o600);
+  expect(statSync(join(dir, '.env')).mode & 0o777).toBe(0o600);
   // 已存在的 0644 文件被覆写后必须被显式收紧
   writeFileSync(join(dir, '.env'), 'x', { mode: 0o644 });
   saveBotEnv(dir, { clientId: 'cid2', clientSecret: 'sec2' });
-  expect((statSync(join(dir, '.env')).mode & 0o777) & 0o077).toBe(0o600);
+  expect(statSync(join(dir, '.env')).mode & 0o777).toBe(0o600);
   expect(loadBotEnv(dir)).toEqual({ clientId: 'cid2', clientSecret: 'sec2' });
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/env.test.ts` Expected: FAIL — `Cannot find module '../../src/env.js'`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/env.test.ts` Expected: FAIL — `Cannot find module '../../src/env.js'`。
 
-- [ ] **Step 3: 实现** `src/env.ts`
+- [x] **Step 3: 实现** `src/env.ts`
 
 ```ts
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -220,9 +220,9 @@ export function saveBotEnv(botDir: string, env: DingtalkEnv): void {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/env.test.ts` Expected: PASS（3 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/env.test.ts` Expected: PASS（3 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/env.ts tests/unit/env.test.ts && git commit -m "feat(env): explicit .bot/.env parser with loud missing-credential errors"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/env.ts tests/unit/env.test.ts && git commit -m "feat(env): explicit .bot/.env parser with loud missing-credential errors"`
 
 ### Task 3: 工作区引导（src/config.ts）
 
