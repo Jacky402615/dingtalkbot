@@ -122,7 +122,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
       try {
         await bridge.start();
         const result = await deps.runner.run(
-          { prompt: effectivePrompt, sessionId: effectiveRecord.sessionId, resume: effectiveResume, cwd: deps.workspace },
+          { prompt: effectivePrompt, sessionId: effectiveRecord.sessionId, resume: effectiveResume, cwd: deps.workspace, chatKey },
           {
             onText: (t) => { lastText = t; return bridge.pushText(t); },
             onQuestion: (p) => {

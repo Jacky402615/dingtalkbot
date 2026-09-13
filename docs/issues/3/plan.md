@@ -306,7 +306,7 @@ test('D3 /new 竞态: 在飞与排队消息跨 reset——旧 id 不复活、后
 **Interfaces:**
 - Produces: `TurnRequest.chatKey?: string`；`ClaudeRunner.abortChat(chatKey: string, reason: string): Promise<number>`（返回**实际发出中止**的回合数——自然完成的在快照期排除，/stop 据此如实回复）；`ClaudeRunner.activeCountOf(chatKey: string): number`（Task 5 commands 消费）
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/unit/claude-runner.test.ts`：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/unit/claude-runner.test.ts`：
 
 ```ts
 test('runner D3: abortChat 只杀目标 chat 的在飞回合，他 chat 不受扰；settle 后索引清零（G4）', async () => {
@@ -350,8 +350,8 @@ test('runner D3: abortChat 空 chat 幂等 no-op 返回 0；自然完成的 chat
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: FAIL（`abortChat`/`activeCountOf` 不是函数）
-- [ ] **Step 3: Write the minimal implementation** — `src/agent/claude-runner.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/claude-runner.test.ts` Expected: FAIL（`abortChat`/`activeCountOf` 不是函数）
+- [x] **Step 3: Write the minimal implementation** — `src/agent/claude-runner.ts`：
 
 ```ts
 export interface TurnRequest { prompt: string; sessionId: string; resume: boolean; cwd: string; chatKey?: string }
@@ -423,8 +423,8 @@ const result = await deps.runner.run(
 );
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/claude-runner.test.ts tests/unit/agent-session.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/agent/claude-runner.ts src/handlers/agent-session.ts tests/unit/claude-runner.test.ts && git commit -m "feat(d3): runner 按 chatKey 路由与 abortChat（/stop 仅杀在飞）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/claude-runner.test.ts tests/unit/agent-session.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/agent/claude-runner.ts src/handlers/agent-session.ts tests/unit/claude-runner.test.ts && git commit -m "feat(d3): runner 按 chatKey 路由与 abortChat（/stop 仅杀在飞）"`
 
 ---
 

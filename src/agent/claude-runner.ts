@@ -6,7 +6,7 @@ export interface AskOption { label: string; description: string }
 export interface AskQuestion { question: string; header: string; multiSelect: boolean; options: AskOption[] }
 export interface AskUserQuestionPayload { toolUseId: string; questions: AskQuestion[] }
 
-export interface TurnRequest { prompt: string; sessionId: string; resume: boolean; cwd: string }
+export interface TurnRequest { prompt: string; sessionId: string; resume: boolean; cwd: string; chatKey?: string }
 
 export interface TurnCallbacks {
   onText?(fullTextSoFar: string): void | Promise<void>;
@@ -30,15 +30,34 @@ export interface ClaudeRunnerOptions {
 interface ActiveChild {
   pid: number;
   killGroup: (s: NodeJS.Signals) => void;
-  abort: (reason: string) => void;
+  abort: (reason: string) => boolean; // true=实际发起强制中止（过滤后到 abort 生效间的自然完成）
   completion: Promise<void>; // 本回合 settle（含 TERM→KILL 升级收尾）
+  isSettled(): boolean;
+  chatKey?: string; // D3：/stop 按 chat 中止的路由键
 }
 
 export class ClaudeRunner {
   private readonly active = new Set<ActiveChild>();
+  private readonly byChat = new Map<string, Set<ActiveChild>>(); // D3：/stop 按 chat 路由索引
   private closed = false;
 
   constructor(private readonly opts: ClaudeRunnerOptions) {}
+
+  activeCountOf(chatKey: string): number { return this.byChat.get(chatKey)?.size ?? 0; }
+
+  // 仅杀该 chat 的在飞回合；返回实际发出中止的回合数（自然完成的在快照期排除）。
+  // settle 由 abort 的 TERM→killDelay→KILL→finish 链保证有界。
+  async abortChat(chatKey: string, reason: string): Promise<number> {
+    const set = this.byChat.get(chatKey);
+    if (set === undefined) return 0;
+    const targets = [...set].filter((a) => !a.isSettled());
+    if (targets.length === 0) return 0;
+    const waits = targets.map((a) => a.completion); // 先取 completion——abort 后 settle 仍可达
+    let aborted = 0;
+    for (const a of targets) { if (a.abort(reason)) aborted += 1; }
+    await Promise.all(waits);
+    return aborted;
+  }
 
   async killAll(): Promise<void> {
     this.closed = true; // 关停后拒绝新 run
@@ -108,7 +127,16 @@ export class ClaudeRunner {
         if (closeFallbackTimer !== null) clearTimeout(closeFallbackTimer);
         for (const t of escalationTimers) clearTimeout(t);
         escalationTimers.clear();
-        if (entryRef !== null) this.active.delete(entryRef);
+        if (entryRef !== null) {
+          this.active.delete(entryRef);
+          if (entryRef.chatKey !== undefined) {
+            const set = this.byChat.get(entryRef.chatKey);
+            if (set !== undefined) {
+              set.delete(entryRef);
+              if (set.size === 0) this.byChat.delete(entryRef.chatKey); // 防泄漏
+            }
+          }
+        }
         const outputText = fullText();
         void emitChain.then(() => {
           resolve({ ok, outputText, errorText, durationMs: (this.opts.now ?? Date.now)() - started });
@@ -131,16 +159,24 @@ export class ClaudeRunner {
         pid: child.pid ?? 0,
         killGroup,
         completion,
+        chatKey: req.chatKey,
+        isSettled: () => settled,
         abort: (reason: string) => {
-          if (settled) return;
+          if (settled) return false; // 竞态窗口内已自然完成——不计入中止数
           forcedError = reason;
           killGroup('SIGTERM');
           const escalation = setTimeout(() => { killGroup('SIGKILL'); finish(false, reason); }, this.opts.killDelayMs ?? 5_000);
           escalationTimers.add(escalation);
+          return true;
         },
       };
       entryRef = entry;
       this.active.add(entry);
+      if (req.chatKey !== undefined) {
+        let set = this.byChat.get(req.chatKey);
+        if (set === undefined) { set = new Set(); this.byChat.set(req.chatKey, set); }
+        set.add(entry);
+      }
       timer = setTimeout(() => {
         this.opts.logger.error('agent', `回合超时 ${this.opts.timeoutMs}ms，进程组杀灭 pid=${child.pid}`);
         forcedError = `回合超时（${this.opts.timeoutMs}ms）`;
