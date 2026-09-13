@@ -2413,7 +2413,7 @@ void main();
 - Consumes: `package.json` 的 build/check:dist 脚本（Task 1）。
 - Produces: `bun run build` 产出 `dist/cli.js`（node shebang、SDK external）；`check:dist` 门禁（机器路径 grep + external 验证）；CI（push/PR：install→typecheck→test→build→check:dist）；publish（手动 dispatch→同一套门禁→`npm publish` 到 npm.pkg.github.com）。
 
-- [ ] **Step 1: 写 check-dist 脚本** `scripts/check-dist.mjs`
+- [x] **Step 1: 写 check-dist 脚本** `scripts/check-dist.mjs`
 
 ```js
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
@@ -2453,9 +2453,9 @@ if (problems.length > 0) {
 console.log('check:dist PASS（shebang 正确；全 dist 无机器路径；dingtalk-stream 保持 external）');
 ```
 
-- [ ] **Step 2: 本地验证** — Run: `bun run build && bun run check:dist && head -c 60 dist/cli.js` Expected: build 成功；check:dist PASS；dist 头部为 `#!/usr/bin/env node`。
+- [x] **Step 2: 本地验证** — Run: `bun run build && bun run check:dist && head -c 60 dist/cli.js` Expected: build 成功；check:dist PASS；dist 头部为 `#!/usr/bin/env node`。
 
-- [ ] **Step 3: 写 CI** `.github/workflows/ci.yml`
+- [x] **Step 3: 写 CI** `.github/workflows/ci.yml`
 
 ```yaml
 name: CI
@@ -2476,7 +2476,7 @@ jobs:
       - run: bun run check:dist
 ```
 
-- [ ] **Step 4: 写发布管道** `.github/workflows/publish.yml`
+- [x] **Step 4: 写发布管道** `.github/workflows/publish.yml`
 
 ```yaml
 name: Publish (GitHub Packages)
@@ -2501,7 +2501,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-- [ ] **Step 5: 验证 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add scripts/check-dist.mjs .github/workflows && git commit -m "build: dist cleanliness gate, CI, and manual GitHub Packages publish pipeline"`
+- [x] **Step 5: 验证 + Commit** — Run: `bun run typecheck && bun test && bun run build && bun run check:dist` Expected: 全绿。`git add scripts/check-dist.mjs .github/workflows && git commit -m "build: dist cleanliness gate, CI, and manual GitHub Packages publish pipeline"`
 
 **--- 检查点 C：出货门禁完成。`bun run typecheck && bun test && bun run build && bun run check:dist` 全绿 ---**
 
