@@ -96,6 +96,19 @@ export function stripExt(name: string): string {
   return m[1];
 }
 
+// write-all 循环（F4）：writeSync 可能短写——按 bytesWritten 推进；零进展即抛（防自旋）；write 可注入直测
+export function writeAllSync(
+  fd: number, chunk: Uint8Array,
+  write: (fd: number, buf: Uint8Array, off: number, len: number) => number = writeSync,
+): void {
+  let off = 0;
+  while (off < chunk.byteLength) {
+    const n = write(fd, chunk, off, chunk.byteLength - off);
+    if (n <= 0) throw new Error('writeSync 零进展');
+    off += n;
+  }
+}
+
 export function extFromFileName(name: string): string {
   const i = name.lastIndexOf('.');
   if (i <= 0 || i === name.length - 1) return 'bin';
@@ -133,10 +146,15 @@ function isPrivateIpv4(host: string): boolean {
   if (m === null) return false;
   const o = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
   if (o.some((n) => n > 255)) return true; // 非法字面量按保留地址拒绝（fail-closed）
-  const [a, b] = o as [number, number, number, number];
+  const [a, b, c] = o as [number, number, number, number];
   return a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
-    || (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64/10
-    || a >= 224;                          // 多播 224/4 + 保留 240/4 + 广播 255（fail-closed）
+    || (a === 100 && b >= 64 && b <= 127)                      // CGNAT 100.64/10
+    || a >= 224                                                // 多播 224/4 + 保留 240/4 + 广播 255（fail-closed）
+    || (a === 192 && b === 0 && (c === 0 || c === 2))          // 192.0.0.0/24 + TEST-NET-1 192.0.2.0/24
+    || (a === 192 && b === 88 && c === 99)                     // 6to4 中继 192.88.99.0/24
+    || (a === 198 && (b === 18 || b === 19))                   // benchmark 198.18.0.0/15
+    || (a === 198 && b === 51 && c === 100)                    // TEST-NET-2 198.51.100.0/24
+    || (a === 203 && b === 0 && c === 113);                    // TEST-NET-3 203.0.113.0/24
 }
 
 // IPv6 判定基于 WHATWG URL 归一化后的形态（v4 映射 ::ffff:10.0.0.1 会被归一为 ::ffff:a00:1——按前缀拒）
@@ -150,6 +168,8 @@ function isPrivateIpv6(host: string): boolean {
   const teredo = /^2001:([0-9a-f]{0,4})/.exec(h);
   if (teredo !== null && (teredo[1] === '' || parseInt(teredo[1], 16) === 0)) return true; // Teredo 2001:0::/32（归一化可压缩零段 2001::x）
   if (h.startsWith('2002:')) return true;        // 6to4 2002::/16
+  if (h.startsWith('100::')) return true;        // discard-only 100::/64
+  if (/^2001:(1[0-9a-f]:|2:|2[0-9a-f]:)/.test(h)) return true; // ORCHID 2001:10::/28 + benchmark 2001:2::/48 + ORCHIDv2 2001:20::/28
   return h.startsWith('fc') || h.startsWith('fd')           // ULA fc00::/7
     || h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb'); // link-local fe80::/10
 }
@@ -231,18 +251,19 @@ export class AttachmentService implements MediaHandler {
     const budget: Budget = { count: 0, bytes: 0 };
     const notes: string[] = [];
     let ok = 0, oversize = 0, corrupt = 0, limited = 0, failed = 0;
+    let limitedNoted = false; // 首个限额命中出个体注记，其余聚合计数——注记有界（G6，防千图 richText 放大）
     let exchanges = 0; // 交换尝试次数（含失败——G7 配额代理指标）
     const maxAttachments = this.opts.maxAttachments ?? MAX_ATTACHMENTS_PER_MESSAGE;
     try {
       for (const att of parsed.attachments) {
-        if (budget.count >= maxAttachments) {
+        if (budget.count >= maxAttachments || budget.bytes >= this.opts.maxBytes) {
           limited += 1;
-          notes.push(`[附件 ${att.kind}] 超出每消息附件数量限额（${maxAttachments}），未下载；内容不可用。`);
-          continue;
-        }
-        if (budget.bytes >= this.opts.maxBytes) {
-          limited += 1;
-          notes.push(`[附件 ${att.kind}] 超出每消息附件总大小限额，未下载；内容不可用。`);
+          if (!limitedNoted) {
+            limitedNoted = true;
+            notes.push(budget.count >= maxAttachments
+              ? `[附件 ${att.kind}] 超出每消息附件数量限额（${maxAttachments}），未下载；内容不可用。`
+              : `[附件 ${att.kind}] 超出每消息附件总大小限额，未下载；内容不可用。`);
+          }
           continue;
         }
         budget.count += 1;
@@ -257,6 +278,7 @@ export class AttachmentService implements MediaHandler {
         }
       }
       if (parsed.skippedUnknown > 0) notes.push('[富文本] 消息含不支持的元素类型，已跳过。');
+      if (limited > 1) notes.push(`[附件] 另有 ${limited - 1} 个附件因限额未下载；内容不可用。`); // 聚合注记（有界）
       if (parsed.attachments.length > 0) notes.push(UNTRUSTED_TRAILER); // 无附件（纯富文本注记）不出附件声明
       if (limited > 0) { // G2：限额降级不止注记——可观测 warn（数量/聚合命中）
         this.opts.logger.warn('media', `附件限额降级 msgId=${m.msgId} kind=${m.msgtype} limited=${limited} 附件数=${parsed.attachments.length} 上限=${maxAttachments} 预算=${budget.bytes}/${this.opts.maxBytes}字节`);
@@ -311,13 +333,7 @@ export class AttachmentService implements MediaHandler {
             this.opts.logger.warn('media', `附件超限中止 kind=${att.kind} msgId=${m.msgId} 上限=${this.opts.maxBytes}字节`);
             return { result: 'oversize', note: `[附件 ${att.kind}] 附件过大（超过 ${this.opts.maxBytes} 字节限额），未归档；内容不可用。` };
           }
-          // write-all 循环：writeSync 可能短写（中断/边界）——按 bytesWritten 推进；零进展即抛（防自旋）
-          let off = 0;
-          while (off < chunk.byteLength) {
-            const n = writeSync(fd, chunk, off, chunk.byteLength - off);
-            if (n <= 0) throw new Error('writeSync 零进展');
-            off += n;
-          }
+          writeAllSync(fd, chunk); // write-all：短写推进 + 零进展守卫（可注入直测）
         }
       }
       drained = true; // 流完整排空（或无 body）——后续异常不再需要归还连接
@@ -374,8 +390,23 @@ export class AttachmentService implements MediaHandler {
       if (err instanceof MediaTerminalError) throw err;
       throw new MediaTerminalError(signal.aborted ? '操作超时' : '文件写入失败', signal.aborted ? 'deadline' : 'fs');
     } finally {
-      // 未排空的响应体（含 dateDir/openSync/超限中止路径的失败）cancel——归还连接（F3）
-      if (!drained) { try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ } }
+      // 未排空的响应体（含 dateDir/openSync/超限中止路径的失败）cancel——有界归还连接（F3）
+      if (!drained) await this.cancelBody(resp);
+    }
+  }
+
+  // 响应体取消：1s 有界竞速（cancel 挂起不得越过媒体 deadline 语义）；挂起截断与失败均落 warn（可观测）
+  private async cancelBody(resp: Response): Promise<void> {
+    if (resp.body === null) return;
+    let settled = false;
+    try {
+      await Promise.race([
+        resp.body.cancel().then(() => { settled = true; }),
+        new Promise<void>((r) => { const t = setTimeout(() => r(), 1_000); t.unref?.(); }),
+      ]);
+      if (!settled) this.opts.logger.warn('media', '响应体 cancel 1s 未完成（竞速截断，连接可能滞留）');
+    } catch (err) {
+      this.opts.logger.warn('media', `响应体 cancel 失败（连接可能滞留）: ${String(err)}`);
     }
   }
 
@@ -393,7 +424,7 @@ export class AttachmentService implements MediaHandler {
         throw new MediaTerminalError(`网络错误（${url.host}）`, 'download');
       }
       if ([301, 302, 303, 307, 308].includes(resp.status)) {
-        try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ } // 未消费体取消——归还连接
+        await this.cancelBody(resp); // 未消费体取消——有界+可观测归还连接
         const loc = resp.headers.get('location');
         if (loc === null) throw new MediaTerminalError(`重定向缺少目标（${url.host}）`, 'download');
         // 解析失败（畸形 Location 的 new URL TypeError 含原始 URL）统一收口——绝不外泄（G7）
@@ -403,7 +434,7 @@ export class AttachmentService implements MediaHandler {
         continue;
       }
       if (!resp.ok) {
-        try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ }
+        await this.cancelBody(resp);
         throw new MediaTerminalError(`下载失败（HTTP ${resp.status}，${url.host}）`, 'download', resp.status);
       }
       return resp;

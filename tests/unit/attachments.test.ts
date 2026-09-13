@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { parseInboundMedia, sanitizeFileName, stripExt, extFromFileName, extForContentType, detectImageFormat, assertPublicHttpsUrl } from '../../src/media/attachments.js';
+import { parseInboundMedia, sanitizeFileName, stripExt, extFromFileName, extForContentType, detectImageFormat, assertPublicHttpsUrl, writeAllSync } from '../../src/media/attachments.js';
 import type { InboundRobotMessage } from '../../src/transport/types.js';
 
 const msg = (msgtype: string, raw: Record<string, unknown>, over: Partial<InboundRobotMessage> = {}): InboundRobotMessage => ({
@@ -95,6 +95,18 @@ test('URL 安全校验: 非 https/凭据/localhost/私网字面 IP 拒绝；公�
   expect(() => assertPublicHttpsUrl('https://[2001:0::1]/a')).toThrow('保留地址');  // Teredo
   expect(() => assertPublicHttpsUrl('https://[2002:8.8.8.8]/a')).toThrow(); // 6to4——URL 解析即非法（fail-closed 收口）；规范形 2002:808:808:: 由前缀拒
   expect(() => assertPublicHttpsUrl('https://[2002:808:808::1]/a')).toThrow('保留地址');
+  expect(() => assertPublicHttpsUrl('https://192.0.0.1/a')).toThrow('保留地址');      // 192.0.0.0/24
+  expect(() => assertPublicHttpsUrl('https://192.0.2.1/a')).toThrow('保留地址');      // TEST-NET-1
+  expect(() => assertPublicHttpsUrl('https://192.88.99.1/a')).toThrow('保留地址');    // 6to4 中继
+  expect(() => assertPublicHttpsUrl('https://198.18.5.1/a')).toThrow('保留地址');     // benchmark 198.18/15
+  expect(() => assertPublicHttpsUrl('https://198.51.100.1/a')).toThrow('保留地址');   // TEST-NET-2
+  expect(() => assertPublicHttpsUrl('https://203.0.113.1/a')).toThrow('保留地址');    // TEST-NET-3
+  expect(() => assertPublicHttpsUrl('https://[100::1]/a')).toThrow('保留地址');       // v6 discard 100::/64
+  expect(() => assertPublicHttpsUrl('https://[2001:2::1]/a')).toThrow('保留地址');    // v6 benchmark 2001:2::/48
+  expect(() => assertPublicHttpsUrl('https://[2001:20::1]/a')).toThrow('保留地址');   // ORCHIDv2 2001:20::/28
+  expect(() => assertPublicHttpsUrl('https://[2001:10::1]/a')).toThrow('保留地址');   // ORCHID（旧）2001:10::/28
+  expect(assertPublicHttpsUrl('https://93.184.216.34/a').hostname).toBe('93.184.216.34'); // 公网 v4 放行
+  expect(assertPublicHttpsUrl('https://[2a00:1450:4001:81d::200e]/a')).not.toBeNull();    // 公网 v6 放行
 });
 
 // ---- Task 3：AttachmentService（下载编排）----
@@ -412,5 +424,56 @@ test('service: 未消费的响应体被 cancel（重定向路径归还连接）'
   const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
   expect(out!.kind).toBe('error');
   await new Promise((r) => setTimeout(r, 10));
+  expect(cancelled).toBe(true);
+});
+
+// ---- pr-review fix-loop r2 回归 ----
+test('writeAllSync: 短写推进（1 字节/次）最终完整落盘；零进展抛错；全量一次写透（注入直测）', () => {
+  const chunk = new Uint8Array([1, 2, 3, 4, 5]);
+  // 短写：每次 1 字节——校验 offset 语义与累计完整性
+  const written: Array<{ off: number; len: number }> = [];
+  writeAllSync(1, chunk, (_fd, _buf, off, len) => { written.push({ off, len }); return 1; });
+  expect(written).toHaveLength(5);
+  expect(written[0]).toEqual({ off: 0, len: 5 });   // 首次请求全量
+  expect(written[1]).toEqual({ off: 1, len: 4 });   // 按推进量递减
+  expect(written[4]).toEqual({ off: 4, len: 1 });
+  // 零进展 → 抛（防自旋）
+  expect(() => writeAllSync(1, chunk, () => 0)).toThrow('零进展');
+  // 全量一次写透：单次调用即结束
+  let calls = 0;
+  writeAllSync(1, chunk, (_fd, _buf, _off, len) => { calls += 1; return len; });
+  expect(calls).toBe(1);
+});
+
+test('service: 限额注记有界——首个限额个体注记 + 聚合计数（千图不放大，G6）', async () => {
+  const els = Array.from({ length: 12 }, (_, i) => ({ type: 'picture', downloadCode: `dc-${i}` }));
+  const { svc } = makeSvc();
+  const out = await svc.handle(msg('richText', { content: { richText: els } }));
+  if (out === null || out.kind !== 'ok') throw new Error('应为 ok 降级结果');
+  expect(out.notes.filter((n) => n.includes('数量限额'))).toHaveLength(1);  // 恰一个个体限额注记
+  expect(out.notes).toContain('[附件] 另有 6 个附件因限额未下载；内容不可用。'); // 5 成功 + 1 个体 + 聚合 6
+  expect(out.notes.length).toBeLessThanOrEqual(5 + 1 + 1 + 1);              // 有界（ok 注记+个体+聚合+trailer）
+});
+
+test('service: body.cancel 挂起被 1s 竞速截断且失败可观测（F3）', async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(PNG as unknown as Uint8Array); },
+    cancel() { cancelled = true; return new Promise<void>(() => {}); }, // cancel 永挂
+  });
+  const { svc, uploadsDir, logs } = makeSvc({
+    fetchFn: (async () => new Response(body as unknown as BodyInit, { status: 200 })) as unknown as typeof fetch,
+  });
+  const day = join(uploadsDir, localDay());
+  mkdirSync(day, { recursive: true });
+  chmodSync(day, 0o500); // dateDir EEXIST 校验通过（目录真实存在）→ openSync EACCES → finally cancel 挂起 → 竞速截断
+  const t0 = Date.now();
+  try {
+    const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+    expect(out!.kind).toBe('error');
+  } finally { chmodSync(day, 0o700); }
+  const elapsed = Date.now() - t0;
+  expect(elapsed).toBeLessThan(5_000); // 1s 竞速截断（非 30s deadline 级等待）
+  expect(logs.some((l) => l.includes('cancel'))).toBe(true); // 可观测（warn 记录竞速超时/失败）
   expect(cancelled).toBe(true);
 });
