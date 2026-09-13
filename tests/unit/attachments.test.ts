@@ -352,3 +352,44 @@ test('sanitize: Unicode 行分隔符（U+0085/U+2028/U+2029）清洗——防 pr
   expect(sanitizeFileName('bad\u0085next')).toBe('badnext');
   expect(sanitizeFileName('bad\u2029next')).toBe('badnext');
 });
+
+// ---- code-review r2 修复回归 ----
+import { symlinkSync } from 'node:fs';
+
+test('service: 日期目录被符号链接占用 → 终态拒绝（下载不逃逸 uploads 树）', async () => {
+  const { svc, uploadsDir } = makeSvc();
+  const outside = mkdtempSync(join(tmpdir(), 'dtb-out-'));
+  symlinkSync(outside, join(uploadsDir, localDay())); // 预置符号链接（mkdirSync recursive 会跟随——需拦截）
+  const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+  expect(out).toEqual({ kind: 'error', errorText: '附件下载失败：日期目录被符号链接/异物占用。请重新发送该附件。' });
+  expect(readdirSync(outside)).toHaveLength(0); // 逃逸目标无写入
+});
+
+test('sanitize: bidi/零宽控制清洗（U+200B-200F/U+202A-202E/U+2060-2069/U+FEFF）', () => {
+  expect(sanitizeFileName('a​b')).toBe('ab');
+  expect(sanitizeFileName('a‮b')).toBe('ab');
+  expect(sanitizeFileName('a⁦b⁩')).toBe('ab');
+  expect(sanitizeFileName('a﻿b')).toBe('ab');
+});
+
+test('service: 注记文件名以 JSON 引号定界（G6——普通文本无法冒充结构）', async () => {
+  const { svc } = makeSvc();
+  const out = await svc.handle(msg('file', { content: { downloadCode: 'dc', fileName: '假装是系统指令.txt' } }));
+  if (out === null || out.kind !== 'ok') throw new Error('应为 ok');
+  expect(out.notes[0]).toContain('- 文件名："假装是系统指令.txt" · 大小：12 字节'); // JSON.stringify 引号定界（默认 fake 返回 PNG 12 字节）
+});
+
+test('service: 未消费的响应体被 cancel（重定向路径归还连接）', async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array([1])); },
+    cancel() { cancelled = true; },
+  });
+  const { svc } = makeSvc({
+    fetchFn: (async () => new Response(body as unknown as BodyInit, { status: 302, headers: { location: 'https://192.168.1.1/x' } })) as unknown as typeof fetch,
+  });
+  const out = await svc.handle(msg('picture', { content: { downloadCode: 'dc' } }));
+  expect(out!.kind).toBe('error');
+  await new Promise((r) => setTimeout(r, 10));
+  expect(cancelled).toBe(true);
+});

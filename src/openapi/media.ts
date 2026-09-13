@@ -23,9 +23,17 @@ export class MediaClient {
     const invoke = async (sig: AbortSignal): Promise<string> => {
       let resp: Response;
       try {
+        // token 获取与 abort 竞速——媒体 30s deadline 可打断挂起的 token 请求（G1）
+        const token = await Promise.race([
+          this.opts.tokenManager.getAccessToken(),
+          new Promise<never>((_, rej) => {
+            if (sig.aborted) { rej(new Error('网络错误')); return; }
+            sig.addEventListener('abort', () => rej(new Error('网络错误')), { once: true });
+          }),
+        ]);
         resp = await doFetch(base + path, {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-acs-dingtalk-access-token': await this.opts.tokenManager.getAccessToken() },
+          headers: { 'content-type': 'application/json', 'x-acs-dingtalk-access-token': token },
           body: JSON.stringify({ downloadCode, robotCode }),
           signal: sig,
         });

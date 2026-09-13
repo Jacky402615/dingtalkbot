@@ -75,7 +75,8 @@ export function parseInboundMedia(m: InboundRobotMessage): MediaParseResult | nu
 // 文件名清洗：去分隔/控制字符/反引号/前导点；字节预算 200（255 NAME_MAX − uuid36 − 连字符 − 扩展余量），
 // code point 迭代截断不切代理对（D6——80 码元的 CJK 名会超 255 字节文件系统上限）。
 export function sanitizeFileName(name: string): string {
-  const base = name.replace(/[\\/\u0000-\u001f\u007f\u0085\u2028\u2029`]/g, '').replace(/^\.+/, '').trim(); // 含 Unicode 行分隔符（防 prompt 换行注入）
+  // 清洗面：路径分隔/控制字符/反引号/前导点/行分隔符(U+0085,U+2028,U+2029)/bidi 与零宽(U+200B-200F,U+202A-202E,U+2060-2069,U+FEFF)——防换行与视觉伪装注入
+  const base = name.replace(/[\\/\u0000-\u001f\u007f\u0085\u2028\u2029\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff`]/g, '').replace(/^\.+/, '').trim();
   let cleaned = base === '' ? 'attachment' : base;
   if (Buffer.byteLength(cleaned, 'utf8') > 200) {
     let out = '';
@@ -161,7 +162,7 @@ export function assertPublicHttpsUrl(raw: string): URL {
   return u;
 }
 
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import type { Logger } from '../logger.js';
@@ -298,8 +299,13 @@ export class AttachmentService implements MediaHandler {
             this.opts.logger.warn('media', `附件超限中止 kind=${att.kind} msgId=${m.msgId} 上限=${this.opts.maxBytes}字节`);
             return { result: 'oversize', note: `[附件 ${att.kind}] 附件过大（超过 ${this.opts.maxBytes} 字节限额），未归档；内容不可用。` };
           }
-          writeSync(fd, chunk);
+          // write-all 循环：writeSync 可能短写（中断/边界）——按 bytesWritten 推进，不假设全量落盘
+          let off = 0;
+          while (off < chunk.byteLength) { off += writeSync(fd, chunk, off, chunk.byteLength - off); }
         }
+      }
+      if (signal.aborted) { // 流恰好完整结束但 deadline 已过——不发布过期回合的产物（G1）
+        throw new MediaTerminalError('操作超时', 'deadline');
       }
       closeSync(fd); fd = null;
       const onDisk = statSync(tmp).size;
@@ -337,13 +343,14 @@ export class AttachmentService implements MediaHandler {
       const display = sanitizeFileName(rawDisplay);
       const final = this.publish(tmp, dir, display, ext);
       const abs = resolve(final);
+      // 文件名以 JSON 字面量嵌入注记（引号定界）——bidi/零宽已清洗，普通文本无法冒充结构（G6）
       if (att.kind === 'voice' || att.kind === 'video') {
         const dur = att.durationSeconds !== undefined ? `（时长 ${att.durationSeconds} 秒）` : '';
         return { result: 'ok', note: `[附件 ${att.kind}] 已归档：\`${abs}\`${dur}\n- 内容不可解析：v1 无法读取语音/视频内容（仅归档）。` };
       }
-      return { result: 'ok', note: `[附件 ${att.kind}] 已下载：\`${abs}\`\n- 文件名：${display}.${ext} · 大小：${bytes} 字节` };
+      return { result: 'ok', note: `[附件 ${att.kind}] 已下载：\`${abs}\`\n- 文件名：${JSON.stringify(`${display}.${ext}`)} · 大小：${bytes} 字节` };
     } catch (err) {
-      if (fd !== null) { try { closeSync(fd); } catch { /* 尽力 */ } }
+      if (fd !== null) { try { closeSync(fd); } catch (cErr) { this.opts.logger.warn('media', `fd 关闭失败 msgId=${m.msgId}: ${String(cErr)}`); } }
       try { if (existsSync(tmp)) unlinkSync(tmp); } catch (cErr) {
         this.opts.logger.warn('media', `半成品清理失败 msgId=${m.msgId}: ${String(cErr)}`); // 不静默（G7：无秘匿内容）
       }
@@ -366,6 +373,7 @@ export class AttachmentService implements MediaHandler {
         throw new MediaTerminalError(`网络错误（${url.host}）`, 'download');
       }
       if ([301, 302, 303, 307, 308].includes(resp.status)) {
+        try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ } // 未消费体取消——归还连接
         const loc = resp.headers.get('location');
         if (loc === null) throw new MediaTerminalError(`重定向缺少目标（${url.host}）`, 'download');
         // 解析失败（畸形 Location 的 new URL TypeError 含原始 URL）统一收口——绝不外泄（G7）
@@ -374,7 +382,10 @@ export class AttachmentService implements MediaHandler {
         try { url = assertPublicHttpsUrl(resolved.toString()); } catch (err) { throw new MediaTerminalError(safeUrlReason(err), 'download'); }
         continue;
       }
-      if (!resp.ok) throw new MediaTerminalError(`下载失败（HTTP ${resp.status}，${url.host}）`, 'download', resp.status);
+      if (!resp.ok) {
+        try { await resp.body?.cancel(); } catch { /* 已关闭则忽略 */ }
+        throw new MediaTerminalError(`下载失败（HTTP ${resp.status}，${url.host}）`, 'download', resp.status);
+      }
       return resp;
     }
     throw new MediaTerminalError('下载失败：重定向次数超限', 'download');
@@ -385,6 +396,14 @@ export class AttachmentService implements MediaHandler {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const dir = join(this.opts.uploadsDir, `${d.getFullYear()}-${mm}-${dd}`);
+    // 包含性防御：既有路径为 symlink（mkdirSync recursive 会跟随——下载可逃逸 uploads 树）→ 终态拒绝
+    try {
+      const st = lstatSync(dir);
+      if (!st.isDirectory()) throw new MediaTerminalError('日期目录被符号链接/异物占用', 'fs');
+    } catch (err) {
+      if (err instanceof MediaTerminalError) throw err;
+      // ENOENT → 正常创建路径；其余（EACCES 等）由 mkdirSync 抛出归入终态
+    }
     // 仅创建时设权（0700，umask 022 下不变）；已存在不 re-chmod——不覆盖 owner 既有权限
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
@@ -401,7 +420,7 @@ export class AttachmentService implements MediaHandler {
         } catch { failed += 1; }
       }
       if (failed > 0) this.opts.logger.warn('media', `陈旧 tmp 清理失败 ${failed} 项（跳过，下轮重试）`);
-    } catch { /* 目录读取失败忽略（目录可能尚不存在） */ }
+    } catch (err) { this.opts.logger.warn('media', `陈旧 tmp 扫描失败（跳过本轮）: ${String(err)}`); }
   }
 
   // link 独占发布（D6/D15）：仅 EEXIST 换发布 id 重试一次；链接成功后的收尾失败撤回链接（不留孤儿副本）；

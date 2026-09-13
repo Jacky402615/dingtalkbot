@@ -14,7 +14,11 @@ export function pruneUploads(uploadsDir: string, logger?: Logger, now: () => num
   const cutoff = now() - UPLOAD_RETENTION_DAYS * DAY_MS;
   const result: PruneResult = { removedFiles: 0, removedDirs: 0, failures: 0 };
   let entries: string[];
-  try { entries = readdirSync(uploadsDir); } catch { return result; }
+  try { entries = readdirSync(uploadsDir); }
+  catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logger?.warn('media', `uploads 根目录读取失败（跳过本轮 prune）: ${String(err)}`);
+    return result;
+  }
   for (const name of entries) {
     const dirPath = join(uploadsDir, name);
     let st;
