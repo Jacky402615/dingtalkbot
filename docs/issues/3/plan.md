@@ -1150,7 +1150,7 @@ export function createDispatchHandler(deps: DispatchDeps): MessageHandler {
 - Consumes: Task 1/4/5/6 全部 Produces；`RunOverrides.depsOverrides`（既有，注入 replyer/runner 观测装配线——注意 dispatch/commands 必须取 `handlerDeps.replyer/runner`（含 override），不得用局部真实实例）
 - Produces: 生产装配完成（dispatch 为唯一 handler）；`Gateway.lastState: ConnectionStateSnapshot | null`
 
-- [ ] **Step 1: Write the failing test** — 追加到 `tests/integration/run.test.ts`（复用其既有 `P2P_PAYLOAD`/`noExit`/`runCommand`+`FakeDwClient` 模式）：
+- [x] **Step 1: Write the failing test** — 追加到 `tests/integration/run.test.ts`（复用其既有 `P2P_PAYLOAD`/`noExit`/`runCommand`+`FakeDwClient` 模式）：
 
 ```ts
 // ---- D3（issue #3）：dispatch 装配线 ----
@@ -1193,7 +1193,7 @@ test('runCommand D3: dispatch 装配——/help 网关应答、陌生 p2p 拒绝
 });
 ```
 
-- [ ] **Step 2: Write the Gateway.lastState failing test** — 追加到 `tests/unit/gateway.test.ts`（复用其既有 fake transport 夹具）：
+- [x] **Step 2: Write the Gateway.lastState failing test** — 追加到 `tests/unit/gateway.test.ts`（复用其既有 fake transport 夹具）：
 
 ```ts
 test('gateway D3: lastState 随 snapshot 更新——/status 的真实数据源（D6）', async () => {
@@ -1205,9 +1205,9 @@ test('gateway D3: lastState 随 snapshot 更新——/status 的真实数据源�
 });
 ```
 
-- [ ] **Step 3: Migrate 既有去重断言** — `tests/unit/agent-session.test.ts` 中依赖内部 Set 的"重复 msgId 丢弃"类用例：删除（等价覆盖已在 `dispatch.test.ts` G5 用例——重复丢弃 + 失败 release 重入；G3 对账竞态用例已在 Task 2 落地）；其余用例全保留。
-- [ ] **Step 4: Run it and verify it FAILS（装配用例）** — Run: `bun test tests/integration/run.test.ts tests/unit/gateway.test.ts` Expected: FAIL（run 装配：/help 直达 agent、陌生消息进 runner、md 无 '未授权'；gateway：`lastState` 不是 getter/未更新）
-- [ ] **Step 5: Write the minimal implementation（本 task 全部改动一次提交）**
+- [x] **Step 3: Migrate 既有去重断言** — `tests/unit/agent-session.test.ts` 中依赖内部 Set 的"重复 msgId 丢弃"类用例：删除（等价覆盖已在 `dispatch.test.ts` G5 用例——重复丢弃 + 失败 release 重入；G3 对账竞态用例已在 Task 2 落地）；其余用例全保留。
+- [x] **Step 4: Run it and verify it FAILS（装配用例）** — Run: `bun test tests/integration/run.test.ts tests/unit/gateway.test.ts` Expected: FAIL（run 装配：/help 直达 agent、陌生消息进 runner、md 无 '未授权'；gateway：`lastState` 不是 getter/未更新）
+- [x] **Step 5: Write the minimal implementation（本 task 全部改动一次提交）**
 
 `src/gateway.ts`：
 
@@ -1259,8 +1259,8 @@ logger.warn('run', 'agent 以 bypassPermissions 运行（无头全权限）；�
 const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 起生效：admin∪approved=p2p 白名单，groups=openConversationId 白名单；手工编辑、每消息读盘
 ```
 
-- [ ] **Step 6: Run it and verify it PASSES** — Run: `bun install && bun run typecheck && bun test` Expected: 全绿（含既有 run/agent-session/gateway 全部用例——去重上收与迁移后无回归）
-- [ ] **Step 7: Commit（单提交完成切换）** — `git add src/gateway.ts src/commands/run.ts src/handlers/agent-session.ts src/config.ts tests/integration/run.test.ts tests/unit/gateway.test.ts tests/unit/agent-session.test.ts && git commit -m "feat(d3): run 装配 dispatch 管线 + 去重上收单提交切换（Gateway.lastState/warn 措辞）"``
+- [x] **Step 6: Run it and verify it PASSES** — Run: `bun install && bun run typecheck && bun test` Expected: 全绿（含既有 run/agent-session/gateway 全部用例——去重上收与迁移后无回归）
+- [x] **Step 7: Commit（单提交完成切换）** — `git add src/gateway.ts src/commands/run.ts src/handlers/agent-session.ts src/config.ts tests/integration/run.test.ts tests/unit/gateway.test.ts tests/unit/agent-session.test.ts && git commit -m "feat(d3): run 装配 dispatch 管线 + 去重上收单提交切换（Gateway.lastState/warn 措辞）"``
 
 **Checkpoint B（Task 7 完成后）**：生产链路 dispatch 化；`bun run build` 冒烟可编译。
 

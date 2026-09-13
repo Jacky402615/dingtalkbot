@@ -12,7 +12,11 @@ export interface GatewayDeps {
 }
 
 export class Gateway {
+  private lastSnap: ConnectionStateSnapshot | null = null;
+
   constructor(private readonly deps: GatewayDeps) {}
+
+  get lastState(): ConnectionStateSnapshot | null { return this.lastSnap; } // D3：/status 数据源
 
   async start(): Promise<void> {
     if (this.deps.handler) this.deps.transport.onMessage(this.deps.handler);
@@ -31,6 +35,7 @@ export class Gateway {
       pid: this.deps.pid, startedAt: this.deps.startedAt, transport: state, detail,
       updatedAt: new Date().toISOString(),
     };
+    this.lastSnap = snap;
     try {
       writeStateJson(this.deps.stateFile, snap);
     } catch (err) {

@@ -10,7 +10,7 @@ import type { ResolvedConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { stripLeadingMention, isNumericReply, renderQuestionList, parseNumericReply } from '../agent/question-bridge.js';
 
-const MSGID_DEDUPE_CAP = 500;
+// msgId 去重已上收 dispatch 层（D3 D10：原子占位/失败释放）；本层只管会话回合。
 const BUSY_TEXT = '忙线中：本会话排队已满，请稍后再试';
 
 export interface AgentHandlerDeps {
@@ -25,15 +25,6 @@ export interface AgentHandlerDeps {
 }
 
 export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandler {
-  const seenMsgIds = new Set<string>();
-  const rememberMsgId = (msgId: string): void => {
-    if (seenMsgIds.has(msgId)) return;
-    seenMsgIds.add(msgId);
-    if (seenMsgIds.size > MSGID_DEDUPE_CAP) {
-      const oldest = seenMsgIds.values().next().value; // Set 保持插入序
-      if (oldest !== undefined) seenMsgIds.delete(oldest);
-    }
-  };
 
   const sendMarkdown = async (m: InboundRobotMessage, text: string): Promise<void> => {
     if (m.conversationKind === 'p2p') {
@@ -50,10 +41,6 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
     }
     if (m.conversationKind !== 'p2p' && m.conversationKind !== 'group') {
       deps.logger.warn('session', `未知会话类型，丢弃 msgId=${m.msgId}`);
-      return;
-    }
-    if (seenMsgIds.has(m.msgId)) {
-      deps.logger.warn('session', `重复 msgId=${m.msgId}，丢弃`);
       return;
     }
 
@@ -77,8 +64,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
         answeredToolUseId = record.pendingQuestion.toolUseId;
         prompt = `${contextPrefix}\n${parsed.answerText}`;
       } else {
-        await sendMarkdown(m, parsed.message); // help：不进 agent，pending 保留
-        rememberMsgId(m.msgId); // 发送成功才记去重——失败时 adapter 重试可重发（不吞必达响应）
+        await sendMarkdown(m, parsed.message); // help：不进 agent，pending 保留（msgId 占位在 dispatch 层）
         return;
       }
     }
@@ -167,10 +153,7 @@ export function createAgentSessionHandler(deps: AgentHandlerDeps): MessageHandle
     });
     if (!enqueued) {
       deps.logger.warn('session', `chat=${chatKey} 忙线，拒绝 msgId=${m.msgId}`);
-      await sendMarkdown(m, BUSY_TEXT);
-      rememberMsgId(m.msgId); // 忙线提示送达才记去重（失败 → adapter 重试重发）
-    } else {
-      rememberMsgId(m.msgId); // 已入队（自身会去重执行路径）；直发/入队失败均不记，重试可重入
+      await sendMarkdown(m, BUSY_TEXT); // 送达失败会上抛（dispatch 层 release 占位，adapter 可重试）
     }
   };
 }

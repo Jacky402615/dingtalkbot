@@ -221,13 +221,7 @@ test('handler: 回合失败（!ok）→ 桥 fail 路径（活卡 isError 收终�
   expect(md).toHaveLength(0);
 });
 
-test('handler: 队列满 → 忙线 markdown；msgId 重复丢弃', async () => {
-  const { calls, runner } = fakeRunner([() => {}]);
-  const dup = harness(runner);
-  await dup.handler(msg({ msgId: 'd1' }));
-  await dup.queue.waitIdle('p2p:st1');
-  await dup.handler(msg({ msgId: 'd1' }));   // 重复 msgId → 丢弃
-  expect(calls).toHaveLength(1);
+test('handler: 队列满 → 忙线 markdown（msgId 去重已上收 dispatch，等价覆盖见 dispatch.test.ts G5）', async () => {
   const busyMd: Array<{ method: string; text: string }> = [];
   const runner2 = fakeRunner([() => {}]).runner;
   const fullQueue = { enqueue: () => false, depthOf: () => 1, close() {}, closed: false, waitIdle: () => Promise.resolve() } as unknown as TurnQueue;

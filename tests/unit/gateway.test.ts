@@ -39,3 +39,21 @@ test('gateway: 启动失败 → 先 stop 清理再向外抛（不残留活动资
   await expect(gw.start()).rejects.toThrow('connect refused');
   expect(events).toContain('stop'); // 失败路径也走了清理
 });
+
+// ---- D3（issue #3）：lastState（/status 数据源） ----
+test('gateway D3: lastState 随 snapshot 更新——/status 的真实数据源（D6）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-gw-d3-'));
+  let listener: ((s: TransportState, d: string) => void) | null = null;
+  const transport = {
+    onStateChange: (l: (s: TransportState, d: string) => void) => { listener = l; },
+    onMessage: () => {},
+    start: async () => {},
+    stop: async () => {},
+  } as unknown as DingtalkTransport;
+  const gw = new Gateway({ transport, logger: consoleLogger, stateFile: join(dir, 'state.json'), pid: 42, startedAt: 'T0' });
+  expect(gw.lastState).toBeNull();                 // 构造后无快照
+  await gw.start();                                // onStateChange 在 start() 内接线
+  listener!('connected', '已连接并订阅');
+  expect(gw.lastState).toMatchObject({ transport: 'connected', detail: '已连接并订阅', pid: 42, startedAt: 'T0' });
+  await gw.stop();
+});
