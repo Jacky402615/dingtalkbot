@@ -1275,7 +1275,7 @@ const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 起生效�
 
 **Interfaces:** 无代码接口；文档契约与 D1/D2 节格式对齐。**G8：本 task 一律不写 `CI-verified` 标注**（Task 9 门禁全绿后回填）。
 
-- [ ] **Step 1: SPEC.md 新增节**（置于 "AI 卡回复" 与 "配置" 节之间）：
+- [x] **Step 1: SPEC.md 新增节**（置于 "AI 卡回复" 与 "配置" 节之间）：
 
 ```md
 ## Commands / Access（D3 契约）
@@ -1288,15 +1288,15 @@ const DEFAULT_ACCESS = { admin: [], approved: [], groups: [] }; // D3 起生效�
 ```
 
 `.bot/` 布局节 `access.json` 行改为：`access.json`（D3 生效：`{admin,approved,groups}` 白名单，每消息读盘）。
-- [ ] **Step 2: CHANGELOG.md**（Unreleased 波次条目，格式对齐既有条目）：
+- [x] **Step 2: CHANGELOG.md**（Unreleased 波次条目，格式对齐既有条目）：
 
 ```md
 - D3 命令/访问/群策略：`/new` `/stop` `/status` `/help` 网关拦截（永不到达 agent）；`access.json`（admin/approved/groups）手工白名单，陌生 p2p 明确拒绝；非白名单群 @ 静默留日志；群内 `/status` 脱敏为计数（破坏性变更：此前任何可见者均可驱动 agent，现在未列入 access.json 的 p2p 发送者与群不再获得响应）。
 ```
 
-- [ ] **Step 3: `docs/issues/3/live-smoke.md` runbook**（真实环境验证步骤，供 owner 执行）：access.json 配置样例、四命令 p2p/群双端用例矩阵（AC1–AC4 的 S8–S12/S3）、access.json 手改即时生效与 typo 自锁恢复、/new 在飞竞态手工用例（长回合中 /new）、/stop 长回合中止与卡终止态观察、群移出白名单后 @ 静默验证。
-- [ ] **Step 4: Verify** — Run: `grep -c "D3 契约" SPEC.md && ! grep -c "CI-verified" <(sed -n '/Commands \/ Access/,/^## /p' SPEC.md)` Expected: `1` 且 D3 节内 0 处 CI-verified（门禁后才回填）
-- [ ] **Step 5: Commit** — `git add SPEC.md CHANGELOG.md docs/issues/3/live-smoke.md && git commit -m "docs(d3): SPEC D3 契约节（未标 CI-verified）+ CHANGELOG + live-smoke runbook"`
+- [x] **Step 3: `docs/issues/3/live-smoke.md` runbook**（真实环境验证步骤，供 owner 执行）：access.json 配置样例、四命令 p2p/群双端用例矩阵（AC1–AC4 的 S8–S12/S3）、access.json 手改即时生效与 typo 自锁恢复、/new 在飞竞态手工用例（长回合中 /new）、/stop 长回合中止与卡终止态观察、群移出白名单后 @ 静默验证。
+- [x] **Step 4: Verify** — Run: `grep -c "D3 契约" SPEC.md && ! grep -c "CI-verified" <(sed -n '/Commands \/ Access/,/^## /p' SPEC.md)` Expected: `1` 且 D3 节内 0 处 CI-verified（门禁后才回填）
+- [x] **Step 5: Commit** — `git add SPEC.md CHANGELOG.md docs/issues/3/live-smoke.md && git commit -m "docs(d3): SPEC D3 契约节（未标 CI-verified）+ CHANGELOG + live-smoke runbook"`
 
 ---
 
