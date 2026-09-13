@@ -437,7 +437,7 @@ const result = await deps.runner.run(
 **Interfaces:**
 - Produces: `interface AccessList { admin: string[]; approved: string[]; groups: string[] }`；`type AccessTier = 'admin' | 'approved' | 'unknown'`；`createAccessLoader(file: string, logger?: Logger, readFile?: (file: string) => string): () => AccessList`；`tierOf(list, staffId): AccessTier`；`isGroupAllowed(list, conversationId): boolean`；`parseAccessList(raw): AccessList | null`；`emptyAccessList(): AccessList`（Task 5/6 消费）
 
-- [ ] **Step 1: Write the failing test** — `tests/unit/access.test.ts`：
+- [x] **Step 1: Write the failing test** — `tests/unit/access.test.ts`：
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -500,8 +500,8 @@ test('access: readFile 注入——首次 ENOENT 重试命中；两次失败 fai
 });
 ```
 
-- [ ] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/access.test.ts` Expected: FAIL（模块不存在）
-- [ ] **Step 3: Write the minimal implementation** — `src/access.ts`：
+- [x] **Step 2: Run it and verify it FAILS** — Run: `bun test tests/unit/access.test.ts` Expected: FAIL（模块不存在）
+- [x] **Step 3: Write the minimal implementation** — `src/access.ts`：
 
 ```ts
 import { readFileSync } from 'node:fs';
@@ -576,8 +576,8 @@ export function createAccessLoader(file: string, logger?: Logger, readFile: Read
 }
 ```
 
-- [ ] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/access.test.ts` Expected: PASS
-- [ ] **Step 5: Commit** — `git add src/access.ts tests/unit/access.test.ts && git commit -m "feat(d3): access.json 每消息读盘 + fail-closed 判定（readFile 可注入）"`
+- [x] **Step 4: Run it and verify it PASSES** — Run: `bun test tests/unit/access.test.ts` Expected: PASS
+- [x] **Step 5: Commit** — `git add src/access.ts tests/unit/access.test.ts && git commit -m "feat(d3): access.json 每消息读盘 + fail-closed 判定（readFile 可注入）"`
 
 ---
 
