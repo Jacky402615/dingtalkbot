@@ -626,7 +626,7 @@ export class ClaudeRunner {
   - `streamingUpdate(args: { outTrackId: string; contentKey: string; content: string; finalize: boolean; error?: boolean }): Promise<void>` → `PUT /v1.0/card/streaming`，body `{outTrackId, guid: randomUUID(), key: contentKey, content, isFull: true, isFinalize: finalize, isError: error ?? false}`。
   - 非 2xx/网络错误：error 日志 + 抛错（deadline 10s，同 RobotReplyer 模式）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -695,8 +695,8 @@ test('card: 非 2xx → 响亮抛错（带响应体）', async () => {
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/card-client.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现** `src/openapi/card.ts`
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/card-client.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现** `src/openapi/card.ts`
 
 ```ts
 import { randomUUID } from 'node:crypto';
@@ -760,8 +760,8 @@ export class CardClient {
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/card-client.test.ts` Expected: PASS（4 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/card.ts tests/unit/card-client.test.ts && git commit -m "feat(card): AI-card createAndDeliver + streamingUpdate OpenAPI client"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/card-client.test.ts` Expected: PASS（4 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/openapi/card.ts tests/unit/card-client.test.ts && git commit -m "feat(card): AI-card createAndDeliver + streamingUpdate OpenAPI client"`
 
 ### Task 4: 双阈值节流器（src/cards/stream-throttle.ts）
 
