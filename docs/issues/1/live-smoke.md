@@ -21,4 +21,9 @@
 - [ ] 显式 ack 抑制 60s 重推（连发 3 条消息，日志无同 messageId 重复 `收到消息`）
 
 ## 执行记录
-（待人工执行后回填——2026-09-13 执行轮：CI 可验证部分已全部完成（57 测试 + typecheck + build + check:dist 绿），本环境无钉钉真凭据，活体验证移交 Human-Review。）
+- 2026-09-13 执行轮（本环境无真凭据，已完成部分）：
+  - `node dist/cli.js --version` → `0.1.0` ✓
+  - `node dist/cli.js status -r /tmp/dtb-cli-test` → `状态: 未运行（无 pidfile）`，退出 0 ✓
+  - `node dist/cli.js setup -r /tmp/dtb-cli-bad --client-id x --client-secret y` → **真实钉钉端点响应** `HTTP 400 {"code":"invalidClientIdOrSecret"}` → `smoke: FAIL`，退出 1 ✓（AC5 的 FAIL 分支已在真实 api.dingtalk.com 上验证：端点 URL、错误映射、响亮失败全部正确；顺带证实本机到钉钉 API 的网络通路）
+  - CI 可验证部分全部完成：57 测试 + typecheck + build + check:dist 绿。
+- 待人工执行（需真凭据 + 真实发消息环境）：步骤 1（真凭据 PASS 分支）、3（起停/状态）、4（p2p 回显）、5（群 @ 回显）、6（断线重连）与三个假设验证位——随 Human-Review 移交。
