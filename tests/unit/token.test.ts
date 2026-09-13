@@ -108,6 +108,40 @@ test('磁盘缓存不可解析 → warn 留痕（#62）并重新获取', async (
   expect(lines.some((l) => l.level === 'warn' && l.msg.includes('不可解析'))).toBe(true);
 });
 
+test('磁盘缓存 JSON 合法但结构异常 → warn 留痕（#62）并重新获取', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  writeFileSync(cacheFile, '{"foo":1}', { mode: 0o600 });
+  const { lines, logger } = recordingLogger();
+  const tm = new TokenManager({ clientId: 'ck', clientSecret: 'cs', cacheFile, logger, fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], []) });
+  expect(await tm.getAccessToken()).toBe('T1');
+  expect(lines.some((l) => l.level === 'warn' && l.msg.includes('结构异常'))).toBe(true);
+});
+
+test('缓存目录不可用 → 降级仅内存，token 仍成功返回', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const blocker = join(dir, 'blocker');
+  writeFileSync(blocker, 'x'); // 文件挡住目录创建路径
+  const { lines, logger } = recordingLogger();
+  const tm = new TokenManager({
+    clientId: 'ck', clientSecret: 'cs', cacheFile: join(blocker, 'token.json'), logger,
+    fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], []),
+  });
+  expect(await tm.getAccessToken()).toBe('T1'); // 不因缓存目录失败而拒绝
+  expect(lines.some((l) => l.level === 'warn' && l.msg.includes('降级仅内存'))).toBe(true);
+});
+
+test('指纹无歧义：含冒号的凭据对不碰撞（各自独立取 token）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
+  const cacheFile = join(dir, 'token.json');
+  const calls: Array<unknown> = [];
+  const t1 = new TokenManager({ clientId: 'a:b', clientSecret: 'c', cacheFile, fetchFn: fakeFetch([{ token: 'T1', expireIn: 7_200 }], calls) });
+  await t1.getAccessToken();
+  const t2 = new TokenManager({ clientId: 'a', clientSecret: 'b:c', cacheFile, fetchFn: fakeFetch([{ token: 'T2', expireIn: 7_200 }], calls) });
+  expect(await t2.getAccessToken()).toBe('T2'); // 旧实现下两对会撞同一指纹而复用 T1
+  expect(t2.fetchCallCount).toBe(1);
+});
+
 test('磁盘缓存权限非 0600 → 忽略并重写收紧', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dtb-tok-'));
   const cacheFile = join(dir, 'token.json');

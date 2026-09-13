@@ -35,8 +35,8 @@ export class TokenManager {
   private readonly cacheKey: string;
 
   constructor(private readonly opts: TokenManagerOptions) {
-    // 凭据指纹（clientId+clientSecret 摘要，不落明文）：任一凭据轮换旧缓存即失效
-    this.cacheKey = createHash('sha256').update(`${opts.clientId}:${opts.clientSecret}`).digest('hex').slice(0, 16);
+    // 凭据指纹（clientId+clientSecret 的无歧义序列化摘要，不落明文）：任一凭据轮换旧缓存即失效
+    this.cacheKey = createHash('sha256').update(JSON.stringify([opts.clientId, opts.clientSecret])).digest('hex').slice(0, 16);
   }
 
   get fetchCallCount(): number { return this.fetchCount; }
@@ -128,7 +128,11 @@ export class TokenManager {
         return null;
       }
       const c = JSON.parse(readFileSync(this.opts.cacheFile, 'utf8')) as TokenCache;
-      return typeof c.accessToken === 'string' && typeof c.expiresAt === 'number' && typeof c.key === 'string' ? c : null;
+      if (typeof c.accessToken !== 'string' || typeof c.expiresAt !== 'number' || typeof c.key !== 'string') {
+        this.opts.logger?.warn('token', 'token 缓存结构异常（缺 key/accessToken/expiresAt），忽略（重新获取）');
+        return null;
+      }
+      return c;
     } catch (err) {
       this.opts.logger?.warn('token', `token 缓存不可解析，忽略（重新获取）: ${String(err)}`);
       return null;
@@ -136,11 +140,11 @@ export class TokenManager {
   }
 
   private writeDisk(cache: TokenCache): void {
-    mkdirSync(dirname(this.opts.cacheFile), { recursive: true });
     // 独占创建（wx）：planted 的同名文件不可能收到 token 内容；每次用唯一名
     const tmp = `${this.opts.cacheFile}.${process.pid}.${Date.now()}.tmp`;
     try {
       try {
+        mkdirSync(dirname(this.opts.cacheFile), { recursive: true }); // 目录不可用 → 降级仅内存，不影响取 token
         writeFileSync(tmp, JSON.stringify(cache), { flag: 'wx', mode: 0o600 });
       } catch (err) {
         throw new Error(`独占创建 tmp 失败（可能被抢占）: ${String(err)}`);

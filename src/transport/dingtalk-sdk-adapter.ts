@@ -130,17 +130,30 @@ export class DingtalkSdkTransport implements DingtalkTransport {
     let attempt = 0;
     this.setState('starting', `首次连接 deadline=${startTimeoutMs}ms`);
     while (alive()) {
+      let attemptPromise: Promise<void> = Promise.resolve();
+      let needRebuild = false;
       try {
         // SDK 的 connect() 永不 reject 且内部 axios 无超时——必须外部设限。
         // 首次阶段与 start deadline 赛跑；运行期（已注册过）用固定 per-attempt 上限。
         const timeoutMs = firstRegisteredDone
           ? attemptTimeoutMs
           : Math.min(attemptTimeoutMs, Math.max(1, deadline - now()));
-        await this.withTimeout(client.connect(), timeoutMs, 'connect()');
+        attemptPromise = client.connect();
+        await this.withTimeout(attemptPromise, timeoutMs, 'connect()');
       } catch (err) {
         this.opts.logger.error('transport', `connect() 失败/超时（监督循环继续）: ${String(err)}`);
-        // 序列化尝试：废弃半途连接（原 connect() promise 可能仍存活并迟到 open）
+        // 废弃尝试迟早会 settle：迟到 open 的 socket 事后必须再清一次（防泄漏活连接）
+        const abandoned = client;
+        void attemptPromise
+          .catch(() => {})
+          .then(() => {
+            try { abandoned.disconnect(); } catch (dErr) { this.opts.logger.warn('transport', `废弃连接迟到清理失败: ${String(dErr)}`); }
+          });
         try { client.disconnect(); } catch (dErr) { this.opts.logger.error('transport', `废弃尝试时 disconnect 失败: ${String(dErr)}`); }
+        needRebuild = true; // 重建移到 alive() 检查之后：旧代 supervisor 不得改写换代后的 this.client
+      }
+      if (!alive()) return; // stop/重启：本代 supervisor 就地退出（且未做任何重建副作用）
+      if (needRebuild) {
         // 每次超时后重建 client：迟到的旧 connect 绝无机会与下一次尝试重叠
         try {
           client = this.initClient(factory);
@@ -155,9 +168,12 @@ export class DingtalkSdkTransport implements DingtalkTransport {
           this.opts.logger.error('transport', '运行期重建失败，沿用旧 client 继续退避');
         }
       }
-      if (!alive()) return; // stop/重启：本代 supervisor 就地退出
       this.watchSocket(client);
-      const ok = await this.waitForRegistered(client, registeredWaitMs, now);
+      // 首次注册等待钳制在剩余 deadline 内：30s 上界不可被 registeredWaitMs 突破
+      const waitMs = firstRegisteredDone
+        ? registeredWaitMs
+        : Math.min(registeredWaitMs, Math.max(1, deadline - now()));
+      const ok = await this.waitForRegistered(client, waitMs, now);
       if (!alive()) return; // 等待注册期间被 stop/重启：迟到的注册不得结算新代
       // 首次注册也受 deadline 约束：迟到（在 registeredWaitMs 内完成但已过线）同样响亮失败
       if (ok && (firstRegisteredDone || now() < deadline)) {

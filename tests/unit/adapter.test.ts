@@ -115,7 +115,7 @@ test('adapter: 换代后迟到的入站消息不进 handler 也不 ack（丢弃 
   await t.stop();
 });
 
-test('adapter: 迟到才 resolve 的 connect 不与下一次尝试重叠（超时后必重建）', async () => {
+test('adapter: 迟到才 resolve 的 connect 不与下一次尝试重叠（超时后必重建，废弃 socket 事后清理）', async () => {
   const clients: FakeDwClient[] = [];
   const t = new DingtalkSdkTransport({
     clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
@@ -132,10 +132,53 @@ test('adapter: 迟到才 resolve 的 connect 不与下一次尝试重叠（超�
   expect(clients.length).toBe(2);
   expect(clients[1].registered).toBe(true);
   expect(clients[1].connectCalls).toBe(1);
-  await new Promise((r) => setTimeout(r, 200)); // client1 的迟到 connect 此刻 resolve
-  expect(clients[0].connected).toBe(true);      // 旧 client 自身状态翻转（无害）
-  expect(t.getState()).toBe('connected');       // 传输仍由 client2 支配，未受重叠干扰
+  await new Promise((r) => setTimeout(r, 250)); // client1 的迟到 connect 已 settle
+  expect(clients[0].connected).toBe(false);     // 废弃 socket 被迟到清理断开（无泄漏活连接）
+  expect(t.getState()).toBe('connected');       // 传输仍由 client2 支配
   expect(clients[1].connectCalls).toBe(1);
+  await t.stop();
+});
+
+test('adapter: 挂起 connect 期间 stop→restart，旧 supervisor 不得劫持新代的 client', async () => {
+  const clients: FakeDwClient[] = [];
+  const t = new DingtalkSdkTransport({
+    clientId: 'id', clientSecret: 'sec', logger: consoleLogger,
+    backoffBaseMs: 5, registeredWaitMs: 300, watchdogPollMs: 20, connectAttemptTimeoutMs: 30, startTimeoutMs: 5_000,
+    sleep: async () => { await new Promise((r) => setTimeout(r, 0)); },
+    clientFactory: () => {
+      const c = new FakeDwClient();
+      if (clients.length === 0) c.hangConnects = 5; // 首个 client 的 connect 长时间挂起
+      clients.push(c);
+      return c;
+    },
+  });
+  let handled = 0;
+  t.onMessage(async () => { handled += 1; });
+  const first = t.start(); // client1（挂起）
+  await new Promise((r) => setTimeout(r, 30));
+  await t.stop();          // 挂起期间 stop
+  const second = t.start(); // 重启（client2，或旧代先重建时为 client3——两种交错都要成立）
+  await expect(first).rejects.toBeInstanceOf(TransportStoppedError);
+  await second;
+  // 挂起的旧代在超时后醒来也不得改写换代后的 this.client：新代消息必须正常处理+ack。
+  // 定位"已注册"的客户端（即当前代持有的那个），避免依赖 factory 调用次序的交错细节。
+  await new Promise((r) => setTimeout(r, 80)); // 等旧代超时路径跑完
+  const live = clients.find((c) => c.registered);
+  expect(live).toBeDefined();
+  live!.emitRobotMessage(TEXT_PAYLOAD, 'post-restart');
+  await new Promise((r) => setTimeout(r, 40));
+  expect(handled).toBe(1);
+  expect(live!.acks).toEqual([{ messageId: 'post-restart', result: { status: 'SUCCESS', message: 'OK' } }]);
+  await t.stop();
+});
+
+test('adapter: 首次注册等待钳制在 30s deadline 内（不被 registeredWaitMs 突破）', async () => {
+  const client = new FakeDwClient();
+  client.registerDelayMs = 150; // 注册延迟超过 deadline
+  const t = makeTransport(client, [], { startTimeoutMs: 80, registeredWaitMs: 60_000 });
+  const t0 = Date.now();
+  await expect(t.start()).rejects.toBeInstanceOf(TransportStartError);
+  expect(Date.now() - t0).toBeLessThan(2_000); // 快速响亮失败，而非等满 registeredWaitMs
   await t.stop();
 });
 
