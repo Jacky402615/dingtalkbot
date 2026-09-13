@@ -1369,7 +1369,7 @@ export class TurnQueue {
      - 回合 info 日志（时长/flush/抑制计数）。
   8. prompt 前缀（issue 明文规定，feishubot 同型）：`[Context: sender=<senderNick>, staffId=<senderStaffId>, chat=<conversationId> (p2p|group)]\n<text>`。
 
-- [ ] **Step 1: 写失败测试** `tests/unit/agent-session.test.ts`
+- [x] **Step 1: 写失败测试** `tests/unit/agent-session.test.ts`
 
 ```ts
 import { test, expect } from 'bun:test';
@@ -1618,11 +1618,11 @@ test('handler: 回合失败（!ok）→ 桥 fail 路径（活卡 isError 收终�
 ```
 
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/agent-session.test.ts` Expected: FAIL。
-- [ ] **Step 3: 实现** `src/handlers/agent-session.ts`（按行为契约 1–8 直写；`seenMsgIds: Set<string>` 超 500 删最早；onQuestion 回调内立即 `store.persist`；job 开始 `store.load` 取盘面真值；终态按"先 ok 后 pending"判定；`!ok && !resume` → `store.delete`；回合 job 整体 try/catch → `bridge.fail` 兜底后 rethrow。）
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/agent-session.test.ts` Expected: FAIL。
+- [x] **Step 3: 实现** `src/handlers/agent-session.ts`（按行为契约 1–8 直写；`seenMsgIds: Set<string>` 超 500 删最早；onQuestion 回调内立即 `store.persist`；job 开始 `store.load` 取盘面真值；终态按"先 ok 后 pending"判定；`!ok && !resume` → `store.delete`；回合 job 整体 try/catch → `bridge.fail` 兜底后 rethrow。）
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/agent-session.test.ts` Expected: PASS（11 tests）。
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/handlers/agent-session.ts tests/unit/agent-session.test.ts && git commit -m "feat(handler): agent session handler — dedupe, arrival-time TTL claim, immediate question persist, queued turns"`
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/agent-session.test.ts` Expected: PASS（11 tests）。
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/handlers/agent-session.ts tests/unit/agent-session.test.ts && git commit -m "feat(handler): agent session handler — dedupe, arrival-time TTL claim, immediate question persist, queued turns"`
 
 ### Task 10: run.ts 重接线 + echo 移除 + 集成测试重写
 
