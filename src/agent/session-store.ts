@@ -98,9 +98,16 @@ export class SessionStore {
     const now = (this.opts.now ?? Date.now)();
     const existing = this.load(chatKey);
     const resume = existing !== null && now - existing.lastActiveAt < this.opts.ttlMs;
-    const record: SessionRecord = resume
-      ? { ...existing, epoch: this.epochOf(chatKey), lastActiveAt: now }
-      : { chatKey, sessionId: randomUUID(), epoch: this.epochOf(chatKey), lastActiveAt: now }; // 新会话：pending 丢弃
+    if (resume) {
+      const record: SessionRecord = { ...existing, epoch: this.epochOf(chatKey), lastActiveAt: now };
+      this.persist(record);
+      return { record, resume };
+    }
+    // 新会话（首条或 TTL 过期换代）：自增代际——仍在飞/排队的旧代回合落盘按陈旧跳过，
+    // 不得把换代后的新 sessionId 倒拨回过期 id（code-review r4，D2 潜伏缺陷）。
+    const epoch = this.epochOf(chatKey) + 1;
+    this.epochs.set(chatKey, epoch);
+    const record: SessionRecord = { chatKey, sessionId: randomUUID(), epoch, lastActiveAt: now }; // 新会话：pending 丢弃
     this.persist(record);
     return { record, resume };
   }

@@ -203,3 +203,21 @@ test('store D3: 作废三级兜底——rename 失败原地覆写；双失败才
   const again = store2.beginTurn('p2p:st2');
   expect(again.resume).toBe(true);
 });
+
+test('store D3/r4: TTL 换代不被在飞旧回合倒拨——旧代 persist 跳过、新 sessionId 存续', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dtb-sess-d3g-'));
+  let clock = 1_000_000;
+  const store = new SessionStore({ sessionsDir: dir, ttlMs: 3_600_000, now: () => clock });
+  const a = store.beginTurn('p2p:st1');                 // A 到达（S1，epoch 0）——回合将挂起
+  expect(a.resume).toBe(false);
+  clock += 3_600_001;                                   // TTL 过期（A 仍在飞）
+  const b = store.beginTurn('p2p:st1');                 // B 到达 → 换代 S2（epoch+1）
+  expect(b.resume).toBe(false);
+  expect(b.record.sessionId).not.toBe(a.record.sessionId);
+  store.persist(a.record);                              // A 在飞结束落盘 → 陈旧代跳过
+  const disk = store.load('p2p:st1');
+  expect(disk!.sessionId).toBe(b.record.sessionId);     // 不倒拨回过期 S1
+  const resumeB = store.beginTurn('p2p:st1');           // 后续消息正常 resume S2
+  expect(resumeB.resume).toBe(true);
+  expect(resumeB.record.sessionId).toBe(b.record.sessionId);
+});
