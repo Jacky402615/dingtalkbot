@@ -605,7 +605,7 @@ export function pidStartMatches(pidFile: string, pid: number): boolean {
 - Produces: `InboundRobotMessage`（msgId/conversationId/conversationKind/senderStaffId/senderNick/robotCode/msgtype/**textContent 原样不 trim**/sessionWebhook/raw）；`ConversationKind`；`MessageHandler`；`StateListener`；`DingtalkTransport { start/stop/onMessage/onStateChange }`；`TransportOptions`（含测试注入 `sleep?`/`now?`）；`conversationKindOf(rawType)`；`normalizeRobotMessage(payload): InboundRobotMessage | null`（防御归一：仅 text 保留原始 content 字符串；未知字段透传 raw；非对象 → null）。
 - Consumes: `Logger`（Task 4）、`TransportState`（Task 5）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/transport-types.test.ts
@@ -635,9 +635,9 @@ test('normalizeRobotMessage: text 全字段且空白原样保留；非 text text
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/transport-types.test.ts` Expected: FAIL — `Cannot find module`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/transport-types.test.ts` Expected: FAIL — `Cannot find module`。
 
-- [ ] **Step 3: 实现** `src/transport/types.ts`
+- [x] **Step 3: 实现** `src/transport/types.ts`
 
 ```ts
 import type { Logger } from '../logger.js';
@@ -711,9 +711,9 @@ export function normalizeRobotMessage(payload: unknown): InboundRobotMessage | n
 }
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/transport-types.test.ts` Expected: PASS（2 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/transport-types.test.ts` Expected: PASS（2 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/transport/types.ts tests/unit/transport-types.test.ts && git commit -m "feat(transport): SDK-free transport port types with defensive message normalization"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/transport/types.ts tests/unit/transport-types.test.ts && git commit -m "feat(transport): SDK-free transport port types with defensive message normalization"`
 
 ### Task 7: SDK adapter + fake DWClient（最高风险任务）
 
