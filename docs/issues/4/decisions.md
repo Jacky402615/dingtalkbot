@@ -162,3 +162,18 @@ Codex 修正（采纳）：原案"除非任务明确要求"例外可被附件内
 - **文件名字节预算**：清洗限长由 80 码元改 200 字节预算（255 NAME_MAX − uuid/扩展余量），code point 迭代截断不切代理对；补 CJK 超长用例。
 - **孤儿尝试重复面驳回（finding 7，记录分歧）**：codex 称 50s racing 放弃后的孤儿尝试可产生重复回合/回复——经核实不成立：transport 重试在 msgId 去重占位未释放时被 dispatch 直接判重复丢弃，重复面既有机制已封；孤儿回合输出送达与文本消息语义一致（非 D4 回归）。signal 贯通仍不采纳（跨层扩张），run.ts 注记补去重兜底说明。
 - **plan round 3 评审**：verdict `needs-attention`（9 项）→ 8 采纳 + 1 驳回（上条）。评审预算（3 轮）已尽，修订如上落地，未跑第 4 轮 codex；残余把关移交执行轮 code-review 与 Human-Review 人工门（D1–D3 同收口姿势）。
+
+### 执行轮实现偏差（TDD 实测修正，2026-09-13）
+
+- **v6 私网判定**：plan 稿 `includes('.')` 误伤普通域名、WHATWG URL 将 `::ffff:10.0.0.1` 归一为 `::ffff:a00:1`——实现改为冒号门控 + 归一化前缀拒（`::ffff:`/`64:ff9b`/ULA/link-local）；`new URL` 解析失败（如 999.1.1.1）统一"非法下载目标 URL"。
+- **utimes/lutimes 数字参数按秒**：ms 数值会变未来时间戳——测试一律 Date 对象；symlink 老化用 `lutimesSync`（不跟随）。
+- **Bun rmSync 对目录恒 EFAULT**：prune 空目录删除改 `rmdirSync`。
+- **run 装配随 Task 6 提交落地**：`AgentHandlerDeps.media` 必填后逐提交门禁绿的必要并入（Task 7 提交仅含集成测试）。
+- **dateDir 不 re-chmod**：原"已存在也 chmod 0700"会覆盖 owner 既有目录权限——改仅创建时设权（code-review r2 发现）。
+- 沙箱环境 `DEBUG=1` 令既有 logger 用例失败（预先存在的环境依赖）——本地门禁 `env -u DEBUG`，非代码问题。
+
+### 执行轮 code-review（2026-09-13，r1 Building）
+
+- **r1（6 项）**：5 修复——写盘循环 deadline 兜底 + 落盘尺寸校验（截断即损坏，防"半图骗过魔数"）；发布仅 EEXIST 重试 + 链接撤回防孤儿副本；sanitize 增 Unicode 行分隔符（U+0085/2028/2029）清洗；MediaClient 网络异常源头脱敏（doFetch 就地泛化，外层仅自有安全文案）；清理失败（半成品/陈旧 tmp/prune 循环）全部 warn 可观测。1 驳回（F6"可执行禁令仅 prompt 级"）——即 decisions D16 既定设计且已 FLAGGED-FOR-HUMAN，执行层技术沙箱属 v2 范围（codex 自评置信 0.74）。
+- **r2（6 项，全部采纳）**：write-all 短写推进循环；流结束后 deadline 复查（不发布过期回合产物）；token 获取与 abort 竞速；日期目录 symlink 拦截（lstat，防 mkdirSync recursive 跟随逃逸——既有目录 mode 校验残余接受：uploads 属 owner 控制面，非攻击者可达）；sanitize 增 bidi/零宽（U+200B-200F/202A-202E/2060-2069/FEFF）+ 注记文件名 JSON 引号定界；未消费响应体 cancel（连接归还）。
+- **终判**：needs-attention → **addressed**（r1+r2 共 12 项：11 修复 + 1 驳回记录分歧）。评审预算（2 轮）用尽；残余把关移交 PR-Review 状态的 codex PR 评审与 Human-Review 人工门。门禁：typecheck + 225 tests + build + check:dist 全绿（`env -u DEBUG`）。
