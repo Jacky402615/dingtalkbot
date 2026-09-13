@@ -334,7 +334,7 @@ export function loadConfig(paths: WorkspacePaths): BotConfig {
 **Interfaces:**
 - Produces: `LogLevel`、`Logger { debug/info/warn/error(module, msg, extra?) }`；`createFileLogger(logsDir): { logger, logFilePath, linkLatest() }`（文件名 `YYYYMMDD_HHMMSS.log`；`latest.log` 符号链接失败回退复制；写失败可见不遮蔽）；`consoleLogger`（stdout/stderr JSON 行）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // tests/unit/logger.test.ts
@@ -372,9 +372,9 @@ test('createFileLogger: DEBUG 环境变量放开 debug 级；同秒两次创建�
 });
 ```
 
-- [ ] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/logger.test.ts` Expected: FAIL — `Cannot find module '../../src/logger.js'`。
+- [x] **Step 2: 验证 FAIL** — Run: `bun test tests/unit/logger.test.ts` Expected: FAIL — `Cannot find module '../../src/logger.js'`。
 
-- [ ] **Step 3: 实现** `src/logger.ts`
+- [x] **Step 3: 实现** `src/logger.ts`
 
 ```ts
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
@@ -445,9 +445,9 @@ export const consoleLogger: Logger = {
 };
 ```
 
-- [ ] **Step 4: 验证 PASS** — Run: `bun test tests/unit/logger.test.ts` Expected: PASS（2 tests）。
+- [x] **Step 4: 验证 PASS** — Run: `bun test tests/unit/logger.test.ts` Expected: PASS（2 tests）。
 
-- [ ] **Step 5: Commit** — `bun run typecheck && bun test && git add src/logger.ts tests/unit/logger.test.ts && git commit -m "feat(logger): dependency-free JSONL logger with latest.log link"`
+- [x] **Step 5: Commit** — `bun run typecheck && bun test && git add src/logger.ts tests/unit/logger.test.ts && git commit -m "feat(logger): dependency-free JSONL logger with latest.log link"`
 
 ### Task 5: 原子状态写入 + pidfile（src/state.ts, src/pid.ts）
 
